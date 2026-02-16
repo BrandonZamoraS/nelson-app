@@ -178,8 +178,6 @@ export type Database = {
           grace_days: number;
           payment_reminder_template: string;
           suspension_notice_template: string;
-          timezone: string;
-          date_format: string;
           updated_at: string;
         };
         Insert: {
@@ -187,16 +185,12 @@ export type Database = {
           grace_days: number;
           payment_reminder_template: string;
           suspension_notice_template: string;
-          timezone: string;
-          date_format: string;
           updated_at?: string;
         };
         Update: {
           grace_days?: number;
           payment_reminder_template?: string;
           suspension_notice_template?: string;
-          timezone?: string;
-          date_format?: string;
           updated_at?: string;
         };
         Relationships: [];

@@ -165,7 +165,7 @@ export async function updatePasswordAction(formData: FormData) {
   });
 
   if (!parsed.success) {
-    const firstError = parsed.error.errors[0];
+    const firstError = parsed.error.issues[0];
     const message = firstError?.message || "Contraseña inválida.";
     redirect(`/configuracion?error=${encodeURIComponent(message)}`);
   }
