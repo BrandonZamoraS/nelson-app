@@ -1,0 +1,57 @@
+name: Deploy Supabase Edge Functions
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: supabase-functions-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Link project
+        run: supabase link --project-ref "$SUPABASE_PROJECT_REF"
+
+      - name: Set function secrets (optional)
+        if: ${{ secrets.AGENT_TOOL_KEY != '' && secrets.SUPABASE_SERVICE_ROLE_KEY != '' && secrets.SUPABASE_URL != '' }}
+        run: |
+          supabase secrets set \
+            --project-ref "$SUPABASE_PROJECT_REF" \
+            AGENT_TOOL_KEY="${{ secrets.AGENT_TOOL_KEY }}" \
+            SUPABASE_URL="${{ secrets.SUPABASE_URL }}" \
+            SUPABASE_SERVICE_ROLE_KEY="${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}"
+
+      - name: Deploy functions
+        run: |
+          set -euo pipefail
+          funcs=(
+            wa_user_context
+            wa_list_crops
+            wa_create_crop
+            wa_update_crop
+            wa_delete_crop
+            wa_finalize_crop
+            wa_list_expense_types
+            wa_list_expenses
+            wa_create_expense
+            wa_update_expense
+            wa_delete_expense
+          )
+          for f in "${funcs[@]}"; do
+            supabase functions deploy "$f"
+          done
+

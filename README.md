@@ -1,36 +1,81 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Nelson Admin
 
-## Getting Started
+Panel administrativo MVP para gestion de usuarios, suscripciones, auditoria y configuracion sobre Next.js + Supabase.
 
-First, run the development server:
+## Stack
+
+- Next.js 16 (App Router)
+- TypeScript
+- Supabase (Auth + Postgres)
+- Zod
+- Playwright
+
+## Variables de entorno
+
+Define estas variables en `.env.local`:
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+```
+
+Para referencia, existe `.env.example`.
+
+## Base de datos
+
+Migraciones y seed versionados:
+
+- `supabase/migrations/202602130001_initial_schema.sql`
+- `supabase/seed.sql`
+
+Consulta `supabase/README.md` para el flujo de aplicacion cuando tengas acceso a DB.
+
+## Scripts
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm run build
+npm run start
+npm run lint
+npm run typecheck
+npm run test
+npm run test:e2e
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Detalle de tests:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- `npm run test:contracts`: contratos F00/F01
+- `npm run test:unit`: reglas de dominio
+- `npm run test:integration`: validadores y contratos de API
+- `npm run test:e2e`: flujos de auth/rutas privadas en Playwright
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## CI
 
-## Learn More
+Workflow principal: `.github/workflows/ci.yml`
 
-To learn more about Next.js, take a look at the following resources:
+Ejecuta:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. `npm ci`
+2. `npm run lint`
+3. `npm run typecheck`
+4. `npm test`
+5. `npm run build`
+6. `npm run test:e2e`
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Rutas principales
 
-## Deploy on Vercel
+- Publica:
+  - `/login`
+- Privadas:
+  - `/` (dashboard)
+  - `/usuarios`
+  - `/suscripciones`
+  - `/auditoria`
+  - `/configuracion`
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Notas operativas
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `proxy.ts` protege rutas privadas y APIs.
+- Existe modo `E2E_AUTH_STUB=true` para pruebas E2E sin dependencia de una instancia real de Supabase.
+- En ejecucion normal, todas las mutaciones relevantes registran auditoria via `lib/audit/log-audit.ts`.
