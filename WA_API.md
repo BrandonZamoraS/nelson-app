@@ -2,373 +2,251 @@
 
 Base URL:
 
-```text
-https://<PROJECT_REF>.functions.supabase.co
-```
+`https://izhazpjzapckskkgayog.functions.supabase.co`
 
-Auth interna (sin JWT):
+## Seguridad y contexto multiusuario
 
-- Header `x-agent-key` debe ser igual a `AGENT_TOOL_KEY` (secret en Supabase).
-- Identidad de usuario: teléfono E.164 desde `x-wa-phone` (preferido) o `body.phone`.
-- Normalización: se conserva solo `+` y dígitos (ej: `" +1 (555) 123-4567 "` -> `+15551234567`).
+- Auth interna: header `x-agent-key` debe coincidir con secret `AGENT_TOOL_KEY`.
+- Identidad de usuario: `x-wa-phone` (preferido) o `body.phone`.
+- Normalizacion de telefono: se conserva `+` y digitos.
+- Resolucion de usuario: `public.users.whatsapp = phone`.
+- Acceso por suscripcion:
+  - `activa`: permitido.
+  - `gracia`: permitido si `hoy <= next_billing_date + app_settings.grace_days`.
+  - `suspendida` o `terminada`: denegado (`403`).
+- Aislamiento: solo cultivos propios (`public.crops.user = users.id`).
+- Auditoria: `public.audit_logs` en todas las operaciones (`actor_admin_id = null`).
 
-Formato de respuesta:
+## Formato de respuesta
 
-- Éxito: `{ "ok": true, ... }`
-- Error: `{ "ok": false, "error": { "code": "...", "message": "...", "detail": ... } }`
+- Exito: `ok=true` con payload del endpoint.
+- Error: `ok=false` con `error.code`, `error.message`, `error.detail` opcional.
 
-Códigos de error comunes:
+## Headers recomendados
 
-- `401 unauthorized`: `x-agent-key` inválido.
-- `400 invalid_phone`: falta `x-wa-phone` o `body.phone` (o no es parseable).
-- `404 user_not_found`: no existe `public.users` para ese `whatsapp`.
-- `403 forbidden`: usuario existe pero no tiene acceso por `subscriptions` + `app_settings.grace_days`.
-- `500 db_error` / `500 internal_error`: error interno o de base de datos.
+- `x-agent-key`
+- `x-wa-phone`
+- `content-type: application/json` para endpoints JSON.
+- excepciones:
+  - `wa_crop_budget_status`: `application/x-www-form-urlencoded` o `text/plain`.
+  - `wa_compare_finished_crops_costs`: `application/x-www-form-urlencoded` o `text/plain`.
+  - `wa_crop_report_data`: `application/x-www-form-urlencoded` o `text/plain`.
 
-Headers requeridos en casi todos los requests:
+## Errores frecuentes
 
-```text
-x-agent-key: <AGENT_TOOL_KEY>
-x-wa-phone: +15551234567
-content-type: application/json
-```
+- `unauthorized`
+- `invalid_phone`
+- `user_not_found`
+- `forbidden`
+- `invalid_crop_id`
+- `crop_not_found`
+- `missing_budget`
+- `crop_budget_missing`
+- `invalid_budget`
+- `invalid_crop_ids`
+- `invalid_finished_crops`
+- `missing_gross_profit`
+- `invalid_gross_profit`
+- `period_out_of_range`
+- `db_error`
+- `internal_error`
 
-Notas para n8n:
+## Endpoints nuevos (reportes y presupuesto)
 
-- Usar node **HTTP Request**.
-- Method: `POST` (recomendado para consistencia, aunque algunos endpoints aceptan `GET`).
-- Authentication: none.
-- Headers: `x-agent-key`, `x-wa-phone`, `content-type: application/json`.
-- Body: JSON (raw).
+### `POST /wa_crop_budget_status`
 
-Importante:
+Objetivo:
 
-- Estas funciones están desplegadas con `verify_jwt=false`. Si llamas por error a un endpoint que exige JWT, verás:
-  `401 Missing authorization header`.
-- Asegúrate de usar `https://<PROJECT_REF>.functions.supabase.co/<function>` (no `...supabase.co/functions/v1/...`).
+- Consultar presupuesto actual de un cultivo y su restante.
+- Solo consulta estado de presupuesto por `crop_id`.
 
-## Endpoints
+Body (campos):
 
-### 1) `POST /wa_user_context`
+- solo `crop_id` requerido.
+- no usar JSON.
 
-Devuelve contexto del usuario (existencia, subscription, acceso). No requiere `allowed=true`.
+Response (campos):
 
-Request body (opcional si usas `x-wa-phone`):
+- `crop`: `id`, `description`, `start_date`, `end_date`, `budget`.
+- `spent_amount`: suma de `expenses.amount` del cultivo.
+- `remaining_amount`: `budget - spent_amount`.
+- `expense_summary`: lista por categoria con `expense_type.id`, `expense_type.description`, `total_amount`.
 
-- `phone` (string)
+Reglas:
 
-Response:
+- Si el cultivo no pertenece al usuario: `crop_not_found`.
+- Si el cultivo no tiene `budget`: `missing_budget`.
 
-- `exists` (boolean)
-- `phone` (string)
-- `user` (opcional): `{ id, full_name, whatsapp, email }`
-- `subscription` (opcional): `{ id, plan, status, next_billing_date, amount_cents, currency }`
-- `access`: `{ allowed, reason, grace_until? }`
-
-```bash
-curl -sS "https://$PROJECT_REF.functions.supabase.co/wa_user_context" \
-  -H "x-agent-key: $AGENT_TOOL_KEY" \
-  -H "x-wa-phone: $PHONE" \
-  -H "content-type: application/json" \
-  -d "{}"
-```
-
-```bash
-curl -sS "https://$PROJECT_REF.functions.supabase.co/wa_user_context" \
-  -H "x-agent-key: $AGENT_TOOL_KEY" \
-  -H "content-type: application/json" \
-  -d "{\"phone\":\"$PHONE\"}"
-```
-
-### 2) `POST /wa_list_crops`
-
-Lista cultivos del usuario (`crops.user = user.id`), ordenado por `created_at desc`.
-
-Response:
-
-- `crops`: array de `{ id, created_at, description, size, start_date, end_date }`
+Smoke test:
 
 ```bash
-curl -sS "https://$PROJECT_REF.functions.supabase.co/wa_list_crops" \
-  -H "x-agent-key: $AGENT_TOOL_KEY" \
-  -H "x-wa-phone: $PHONE" \
-  -H "content-type: application/json" \
-  -d "{}"
+curl -sS -X POST "https://izhazpjzapckskkgayog.functions.supabase.co/wa_crop_budget_status" \
+  -H "x-agent-key: <AGENT_TOOL_KEY>" \
+  -H "x-wa-phone: <PHONE_E164>" \
+  -H "content-type: application/x-www-form-urlencoded" \
+  --data "crop_id=<CROP_ID>"
 ```
+
+Alternativa `text/plain`:
 
 ```bash
-curl -sS "https://$PROJECT_REF.functions.supabase.co/wa_list_crops" \
-  -H "x-agent-key: $AGENT_TOOL_KEY" \
-  -H "x-wa-phone: $PHONE" \
-  -H "content-type: application/json" \
-  -d "{\"phone\":\"$PHONE\"}"
+curl -sS -X POST "https://izhazpjzapckskkgayog.functions.supabase.co/wa_crop_budget_status" \
+  -H "x-agent-key: <AGENT_TOOL_KEY>" \
+  -H "x-wa-phone: <PHONE_E164>" \
+  -H "content-type: text/plain" \
+  --data "<CROP_ID>"
 ```
 
-### 3) `POST /wa_create_crop`
+### `POST /wa_compare_finished_crops_costs`
 
-Crea cultivo para el usuario (inserta con `user = user.id`).
+Objetivo:
 
-Request body:
+- Comparar costos de uno o dos cultivos terminados.
+- No incluye presupuestos.
 
-- `description` (string|null, opcional)
-- `size` (number|null, opcional)
-- `start_date` (YYYY-MM-DD|null, opcional)
-- `end_date` (YYYY-MM-DD|null, opcional)
+Body (campos):
 
-Response:
+- `crop_id_1` requerido.
+- `crop_id_2` opcional.
+- no usar JSON.
 
-- `crop`: `{ id, created_at, description, size, start_date, end_date }`
+Response (campos):
+
+- `items`: por cultivo `crop_id`, `description`, `end_date`, `total_spent`.
+- `grand_total_spent`: suma global.
+
+Reglas:
+
+- Si algun id no pertenece al usuario o no esta terminado (`end_date` null), devuelve `400` sin parciales.
+- `error.detail.failures` incluye ids y razon.
+
+Smoke test:
 
 ```bash
-curl -sS "https://$PROJECT_REF.functions.supabase.co/wa_create_crop" \
-  -H "x-agent-key: $AGENT_TOOL_KEY" \
-  -H "x-wa-phone: $PHONE" \
-  -H "content-type: application/json" \
-  -d "{\"description\":\"Maiz\",\"size\":1.5,\"start_date\":\"2026-02-01\"}"
+curl -sS -X POST "https://izhazpjzapckskkgayog.functions.supabase.co/wa_compare_finished_crops_costs" \
+  -H "x-agent-key: <AGENT_TOOL_KEY>" \
+  -H "x-wa-phone: <PHONE_E164>" \
+  -H "content-type: application/x-www-form-urlencoded" \
+  --data "crop_id_1=<CROP_ID_1>&crop_id_2=<CROP_ID_2_OPCIONAL>"
 ```
+
+Alternativa `text/plain`:
 
 ```bash
-curl -sS "https://$PROJECT_REF.functions.supabase.co/wa_create_crop" \
-  -H "x-agent-key: $AGENT_TOOL_KEY" \
-  -H "x-wa-phone: $PHONE" \
-  -H "content-type: application/json" \
-  -d "{\"description\":\"Tomate\",\"end_date\":\"2026-02-15\"}"
+curl -sS -X POST "https://izhazpjzapckskkgayog.functions.supabase.co/wa_compare_finished_crops_costs" \
+  -H "x-agent-key: <AGENT_TOOL_KEY>" \
+  -H "x-wa-phone: <PHONE_E164>" \
+  -H "content-type: text/plain" \
+  --data "crop_id_1=<CROP_ID_1>&crop_id_2=<CROP_ID_2_OPCIONAL>"
 ```
 
-### 4) `POST /wa_update_crop`
+### `POST /wa_crop_report_data`
 
-Actualiza cultivo solo si pertenece al usuario.
+Objetivo:
 
-Request body:
+- Retornar toda la data para que n8n construya PDF.
+- No genera PDF en la funcion.
 
-- `crop_id` (number|string, requerido)
-- `description` (string|null, opcional)
-- `size` (number|null, opcional)
-- `start_date` (YYYY-MM-DD|null, opcional)
-- `end_date` (YYYY-MM-DD|null, opcional)
+Body (campos):
 
-Response:
+- solo `crop_id` requerido.
+- no enviar `date_from`.
+- no enviar `date_to`.
 
-- `crop`: `{ id, created_at, description, size, start_date, end_date }`
+Response (campos):
+
+- `report_type`: `partial` o `total`.
+- `period`: `from`, `to` finales usados.
+- `crop`: `id`, `description`, `size`, `start_date`, `end_date`, `budget`.
+- `spent_amount`.
+- `gross_profit`: valor bruto registrado al finalizar (o `null` si no existe).
+- `net_profit`: `gross_profit - spent_amount` (o `null` si `gross_profit` no existe).
+- `remaining_amount` si hay presupuesto.
+- `category_totals`: lista por categoria de gasto.
+- `expenses`: detalle con `created_at`, `description`, `amount`, `expense_type.id`, `expense_type.description`.
+
+Reglas de periodo:
+
+- Cultivo activo (`end_date` null): `partial`, rango `start_date..hoy`.
+- Cultivo terminado: `total`, rango `start_date..end_date`.
+
+Smoke test:
+
+Importante de formato:
+
+- para este endpoint no usar JSON.
+- `content-type` permitido: `application/x-www-form-urlencoded` o `text/plain`.
 
 ```bash
-curl -sS "https://$PROJECT_REF.functions.supabase.co/wa_update_crop" \
-  -H "x-agent-key: $AGENT_TOOL_KEY" \
-  -H "x-wa-phone: $PHONE" \
-  -H "content-type: application/json" \
-  -d "{\"crop_id\":1,\"description\":\"Maiz (actualizado)\"}"
+curl -sS -X POST "https://izhazpjzapckskkgayog.functions.supabase.co/wa_crop_report_data" \
+  -H "x-agent-key: <AGENT_TOOL_KEY>" \
+  -H "x-wa-phone: <PHONE_E164>" \
+  -H "content-type: application/x-www-form-urlencoded" \
+  --data "crop_id=<CROP_ID>"
 ```
+
+Alternativa `text/plain`:
 
 ```bash
-curl -sS "https://$PROJECT_REF.functions.supabase.co/wa_update_crop" \
-  -H "x-agent-key: $AGENT_TOOL_KEY" \
-  -H "x-wa-phone: $PHONE" \
-  -H "content-type: application/json" \
-  -d "{\"crop_id\":1,\"end_date\":\"2026-03-01\"}"
+curl -sS -X POST "https://izhazpjzapckskkgayog.functions.supabase.co/wa_crop_report_data" \
+  -H "x-agent-key: <AGENT_TOOL_KEY>" \
+  -H "x-wa-phone: <PHONE_E164>" \
+  -H "content-type: text/plain" \
+  --data "<CROP_ID>"
 ```
 
-### 5) `POST /wa_delete_crop`
+## Endpoints existentes
 
-Elimina cultivo solo si pertenece al usuario. OJO: por FK en DB también eliminará gastos asociados al crop.
+- `POST /wa_user_context`
+- `POST /wa_list_crops`
+- `POST /wa_create_crop`
+- `POST /wa_update_crop`
+- `POST /wa_delete_crop`
+- `POST /wa_finalize_crop`
+- `POST /wa_list_expense_types`
+- `POST /wa_list_expenses`
+- `POST /wa_create_expense`
+- `POST /wa_update_expense`
+- `POST /wa_delete_expense`
 
-Request body:
+### `POST /wa_finalize_crop`
 
-- `crop_id` (number|string, requerido) o `id`
+Objetivo:
 
-Response:
+- Marcar cultivo como finalizado (`end_date`).
+- Opcionalmente registrar `gross_profit` (ganancia bruta) al finalizar.
 
-- `deleted`: `{ id }`
+Body (JSON):
+
+- `crop_id` requerido.
+- `end_date` opcional (`YYYY-MM-DD`, por defecto hoy UTC).
+- `gross_profit` requerido (numero `>= 0`).
+- `ganancia_bruta` opcional (alias de `gross_profit`).
+
+Smoke test:
 
 ```bash
-curl -sS "https://$PROJECT_REF.functions.supabase.co/wa_delete_crop" \
-  -H "x-agent-key: $AGENT_TOOL_KEY" \
-  -H "x-wa-phone: $PHONE" \
+curl -sS -X POST "https://izhazpjzapckskkgayog.functions.supabase.co/wa_finalize_crop" \
+  -H "x-agent-key: <AGENT_TOOL_KEY>" \
+  -H "x-wa-phone: <PHONE_E164>" \
   -H "content-type: application/json" \
-  -d "{\"crop_id\":1}"
+  -d "{\"crop_id\":<CROP_ID>,\"gross_profit\":125000.50}"
 ```
 
-```bash
-curl -sS "https://$PROJECT_REF.functions.supabase.co/wa_delete_crop" \
-  -H "x-agent-key: $AGENT_TOOL_KEY" \
-  -H "x-wa-phone: $PHONE" \
-  -H "content-type: application/json" \
-  -d "{\"id\":1}"
-```
+Tambien puedes usar el alias `ganancia_bruta`.
 
-### 6) `POST /wa_finalize_crop`
+Notas para gastos (`wa_create_expense` y `wa_update_expense`):
 
-Finaliza cultivo: setea `end_date`. Si no viene `end_date`, usa hoy (UTC).
+- Si el cultivo no tiene presupuesto configurado, retorna `400 crop_budget_missing`.
+- En exito, la respuesta incluye `budget_status` para informar al agente:
+  - `crop_id`
+  - `budget`
+  - `total_spent`
+  - `remaining_budget`
+  - `over_budget`
 
-Request body:
+Notas para finalizar cultivo (`wa_finalize_crop`):
 
-- `crop_id` (number|string, requerido)
-- `end_date` (YYYY-MM-DD, opcional)
-
-Response:
-
-- `crop`: `{ id, created_at, description, size, start_date, end_date }`
-
-```bash
-curl -sS "https://$PROJECT_REF.functions.supabase.co/wa_finalize_crop" \
-  -H "x-agent-key: $AGENT_TOOL_KEY" \
-  -H "x-wa-phone: $PHONE" \
-  -H "content-type: application/json" \
-  -d "{\"crop_id\":1}"
-```
-
-```bash
-curl -sS "https://$PROJECT_REF.functions.supabase.co/wa_finalize_crop" \
-  -H "x-agent-key: $AGENT_TOOL_KEY" \
-  -H "x-wa-phone: $PHONE" \
-  -H "content-type: application/json" \
-  -d "{\"crop_id\":1,\"end_date\":\"2026-02-15\"}"
-```
-
-### 7) `POST /wa_list_expense_types`
-
-Lista catálogo de tipos de gasto.
-
-Response:
-
-- `expense_types`: array de `{ id, created_at, description }`
-
-```bash
-curl -sS "https://$PROJECT_REF.functions.supabase.co/wa_list_expense_types" \
-  -H "x-agent-key: $AGENT_TOOL_KEY" \
-  -H "x-wa-phone: $PHONE" \
-  -H "content-type: application/json" \
-  -d "{}"
-```
-
-```bash
-curl -sS "https://$PROJECT_REF.functions.supabase.co/wa_list_expense_types" \
-  -H "x-agent-key: $AGENT_TOOL_KEY" \
-  -H "x-wa-phone: $PHONE" \
-  -H "content-type: application/json" \
-  -d "{\"phone\":\"$PHONE\"}"
-```
-
-### 8) `POST /wa_list_expenses`
-
-Lista gastos del usuario. Si envías `crop_id`, valida pertenencia y filtra.
-Incluye `expense_type_description` (join lógico contra `expenses_type`).
-
-Request body:
-
-- `crop_id` (number|string, opcional)
-
-Response:
-
-- `expenses`: array de `{ id, created_at, description, amount, crop_id, expense_type, expense_type_description }`
-
-```bash
-curl -sS "https://$PROJECT_REF.functions.supabase.co/wa_list_expenses" \
-  -H "x-agent-key: $AGENT_TOOL_KEY" \
-  -H "x-wa-phone: $PHONE" \
-  -H "content-type: application/json" \
-  -d "{}"
-```
-
-```bash
-curl -sS "https://$PROJECT_REF.functions.supabase.co/wa_list_expenses" \
-  -H "x-agent-key: $AGENT_TOOL_KEY" \
-  -H "x-wa-phone: $PHONE" \
-  -H "content-type: application/json" \
-  -d "{\"crop_id\":1}"
-```
-
-### 9) `POST /wa_create_expense`
-
-Crea gasto. Valida:
-
-- `amount > 0`
-- `crop_id` pertenece al usuario (`crops.user = user.id`)
-- `expense_type` existe en `expenses_type`
-
-Request body:
-
-- `crop_id` (number|string, requerido)
-- `expense_type` (number|string, requerido)
-- `amount` (number, requerido, > 0)
-- `description` (string|null, opcional)
-
-Response:
-
-- `expense`: `{ id, created_at, description, amount, crop_id, expense_type }`
-
-```bash
-curl -sS "https://$PROJECT_REF.functions.supabase.co/wa_create_expense" \
-  -H "x-agent-key: $AGENT_TOOL_KEY" \
-  -H "x-wa-phone: $PHONE" \
-  -H "content-type: application/json" \
-  -d "{\"crop_id\":1,\"expense_type\":1,\"amount\":120.5,\"description\":\"Fertilizante\"}"
-```
-
-```bash
-curl -sS "https://$PROJECT_REF.functions.supabase.co/wa_create_expense" \
-  -H "x-agent-key: $AGENT_TOOL_KEY" \
-  -H "x-wa-phone: $PHONE" \
-  -H "content-type: application/json" \
-  -d "{\"crop_id\":1,\"expense_type\":1,\"amount\":10}"
-```
-
-### 10) `POST /wa_update_expense`
-
-Actualiza gasto solo si pertenece al usuario (pertenencia validada via crop).
-Permite cambiar `description`, `amount`, `expense_type`, `crop_id` con validaciones.
-
-Request body:
-
-- `expense_id` (number|string, requerido)
-- `description` (string|null, opcional)
-- `amount` (number, opcional, > 0)
-- `expense_type` (number|string|null, opcional; si es null se setea null)
-- `crop_id` (number|string, opcional; debe pertenecer al usuario)
-
-Response:
-
-- `expense`: `{ id, created_at, description, amount, crop_id, expense_type }`
-
-```bash
-curl -sS "https://$PROJECT_REF.functions.supabase.co/wa_update_expense" \
-  -H "x-agent-key: $AGENT_TOOL_KEY" \
-  -H "x-wa-phone: $PHONE" \
-  -H "content-type: application/json" \
-  -d "{\"expense_id\":1,\"amount\":150}"
-```
-
-```bash
-curl -sS "https://$PROJECT_REF.functions.supabase.co/wa_update_expense" \
-  -H "x-agent-key: $AGENT_TOOL_KEY" \
-  -H "x-wa-phone: $PHONE" \
-  -H "content-type: application/json" \
-  -d "{\"expense_id\":1,\"description\":\"Fertilizante (actualizado)\",\"crop_id\":1}"
-```
-
-### 11) `POST /wa_delete_expense`
-
-Elimina gasto solo si pertenece al usuario.
-
-Request body:
-
-- `expense_id` (number|string, requerido) o `id`
-
-Response:
-
-- `deleted`: `{ id }`
-
-```bash
-curl -sS "https://$PROJECT_REF.functions.supabase.co/wa_delete_expense" \
-  -H "x-agent-key: $AGENT_TOOL_KEY" \
-  -H "x-wa-phone: $PHONE" \
-  -H "content-type: application/json" \
-  -d "{\"expense_id\":1}"
-```
-
-```bash
-curl -sS "https://$PROJECT_REF.functions.supabase.co/wa_delete_expense" \
-  -H "x-agent-key: $AGENT_TOOL_KEY" \
-  -H "x-wa-phone: $PHONE" \
-  -H "content-type: application/json" \
-  -d "{\"id\":1}"
-```
+- `end_date` sigue siendo opcional (`YYYY-MM-DD`, default: hoy UTC).
+- `gross_profit` es obligatorio y debe ser numero `>= 0`.
+- Tambien se acepta alias `ganancia_bruta` como entrada.

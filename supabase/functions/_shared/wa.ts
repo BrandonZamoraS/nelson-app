@@ -1,11 +1,5 @@
-// Shared helpers for WhatsApp agent edge functions.
-//
-// Design goals:
-// - No JWT auth (verify_jwt=false); internal auth via x-agent-key.
-// - Identify user by E.164 phone from header/body (never from chat text).
-// - Use service-role Supabase client to bypass RLS, but gate everything with AGENT_TOOL_KEY.
-
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { coercePositiveIntId } from "../../../lib/utils/coerce-id.ts";
 
 export type WaErrorResponse = {
   ok: false;
@@ -48,16 +42,19 @@ export type Access = {
     | "suspendida"
     | "terminada"
     | "unknown_status";
-  grace_until?: string; // YYYY-MM-DD
+  grace_until?: string;
 };
 
-export type WaContext = {
-  phone: string;
+export type ResolvedUserAndAccess = {
   exists: boolean;
   user: UserRow | null;
   subscription: Omit<SubscriptionRow, "user_id"> | null;
   access: Access;
   app_settings: Pick<AppSettingsRow, "grace_days"> | null;
+};
+
+export type WaContext = ResolvedUserAndAccess & {
+  phone: string;
 };
 
 type HandlerArgs = {
@@ -73,6 +70,8 @@ export type CropRow = {
   created_at: string;
   description: string | null;
   size: number | null;
+  budget: number | null;
+  gross_profit: number | null;
   start_date: string | null;
   end_date: string | null;
   user: string | null;
@@ -86,6 +85,31 @@ export type ExpenseRow = {
   amount: number | null;
   crop_id: number | null;
 };
+
+export type CropBudgetStatus = {
+  crop_id: number;
+  budget: number;
+  total_spent: number;
+  remaining_budget: number;
+  over_budget: boolean;
+};
+
+export function isCropActive(crop: Pick<CropRow, "end_date">): boolean {
+  return crop.end_date === null;
+}
+
+class WaHttpError extends Error {
+  status: number;
+  code: string;
+  detail?: unknown;
+
+  constructor(status: number, code: string, message: string, detail?: unknown) {
+    super(message);
+    this.status = status;
+    this.code = code;
+    this.detail = detail;
+  }
+}
 
 const CORS_HEADERS: Record<string, string> = {
   "access-control-allow-origin": "*",
@@ -102,6 +126,17 @@ function env(name: string): string {
   const v = Deno.env.get(name);
   if (!v) throw new Error(`Missing env var: ${name}`);
   return v;
+}
+
+function toErrorResponse(error: unknown): Response {
+  if (error instanceof WaHttpError) {
+    return jsonErr(error.status, error.code, error.message, error.detail);
+  }
+  return jsonErr(500, "internal_error", "Unhandled error", String(error));
+}
+
+function throwHttp(status: number, code: string, message: string, detail?: unknown): never {
+  throw new WaHttpError(status, code, message, detail);
 }
 
 let _admin: SupabaseClient | null = null;
@@ -136,9 +171,8 @@ export function jsonErr(
 
 export function normalizePhone(input: unknown): string | null {
   if (typeof input !== "string") return null;
-  const digits = input.replace(/[^\d]+/g, "");
+  const digits = input.replace(/[^\d+]/g, "").replace(/\+/g, "");
   if (!digits) return null;
-  // Force E.164-like: '+' + digits.
   return `+${digits}`;
 }
 
@@ -152,11 +186,12 @@ function utcTodayStr(): string {
 
 function parseDateUTC(dateStr: string): Date | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return null;
-  const [y, m, d] = dateStr.split("-").map((v) => Number(v));
+  const [y, m, d] = dateStr.split("-").map((value) => Number(value));
   const dt = new Date(Date.UTC(y, m - 1, d));
-  // Validate round-trip (e.g. 2026-02-31 should be rejected).
-  const rt = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
-  if (rt !== dateStr) return null;
+  const roundTrip = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${
+    String(dt.getUTCDate()).padStart(2, "0")
+  }`;
+  if (roundTrip !== dateStr) return null;
   return dt;
 }
 
@@ -164,10 +199,7 @@ function addDays(dateStr: string, days: number): string {
   const dt = parseDateUTC(dateStr);
   if (!dt) return dateStr;
   dt.setUTCDate(dt.getUTCDate() + days);
-  const y = dt.getUTCFullYear();
-  const m = String(dt.getUTCMonth() + 1).padStart(2, "0");
-  const d = String(dt.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
 }
 
 export function isISODate(input: unknown): input is string {
@@ -178,11 +210,15 @@ export function isNumber(input: unknown): input is number {
   return typeof input === "number" && Number.isFinite(input);
 }
 
+export function isPositiveFiniteNumber(input: unknown): input is number {
+  return isNumber(input) && input > 0;
+}
+
 async function safeJson(req: Request): Promise<{ body: any; error: Response | null }> {
   if (req.method === "GET" || req.method === "HEAD") return { body: null, error: null };
+
   const contentType = req.headers.get("content-type") ?? "";
   if (!contentType.toLowerCase().includes("application/json")) {
-    // Allow empty body for POST if phone comes from headers, but reject non-empty invalid JSON.
     try {
       const text = await req.text();
       if (!text.trim()) return { body: null, error: null };
@@ -191,22 +227,34 @@ async function safeJson(req: Request): Promise<{ body: any; error: Response | nu
       return { body: null, error: jsonErr(400, "invalid_json", "Body must be JSON") };
     }
   }
+
   try {
     const body = await req.json();
     return { body, error: null };
-  } catch (e) {
-    return { body: null, error: jsonErr(400, "invalid_json", "Invalid JSON body", String(e)) };
+  } catch (error) {
+    return { body: null, error: jsonErr(400, "invalid_json", "Invalid JSON body", String(error)) };
   }
 }
 
-function checkAgentKey(req: Request): Response | null {
+export function requireInternalKey(req: Request): void {
   const provided = req.headers.get("x-agent-key") ?? "";
-  // Primary secret name: AGENT_TOOL_KEY (as documented).
-  // Back-compat: some environments may have been configured with a non-standard secret name.
-  const expected = Deno.env.get("AGENT_TOOL_KEY") ?? Deno.env.get("x-agent-key") ?? "";
-  if (!expected) return jsonErr(500, "missing_env", "AGENT_TOOL_KEY is not configured");
-  if (!provided || provided !== expected) return jsonErr(401, "unauthorized", "Invalid agent key");
-  return null;
+  const expected = Deno.env.get("x-agent-key") ?? "";
+
+  if (!expected) {
+    throwHttp(500, "missing_env", "x-agent-key is not configured");
+  }
+  if (!provided || provided !== expected) {
+    throwHttp(401, "unauthorized", "Invalid agent key");
+  }
+}
+
+export function getPhone(req: Request, body?: any): string {
+  const rawPhone = req.headers.get("x-wa-phone") ?? body?.phone;
+  const phone = normalizePhone(rawPhone);
+  if (!phone) {
+    throwHttp(400, "invalid_phone", "Missing or invalid phone (x-wa-phone or body.phone)");
+  }
+  return phone;
 }
 
 async function fetchAppSettings(supabase: SupabaseClient): Promise<Pick<AppSettingsRow, "grace_days"> | null> {
@@ -222,11 +270,20 @@ async function fetchAppSettings(supabase: SupabaseClient): Promise<Pick<AppSetti
 async function fetchUserByPhone(supabase: SupabaseClient, phone: string): Promise<UserRow | null> {
   const { data, error } = await supabase
     .from("users")
-    .select("id, full_name, whatsapp, email")
+    .select("id, full_name, whatsapp")
     .eq("whatsapp", phone)
     .maybeSingle();
   if (error) throw error;
-  return (data as UserRow) ?? null;
+
+  const row = data as { id: string; full_name: string; whatsapp: string } | null;
+  if (!row) return null;
+
+  return {
+    id: row.id,
+    full_name: row.full_name,
+    whatsapp: row.whatsapp,
+    email: null,
+  };
 }
 
 async function fetchSubscriptionForUser(
@@ -257,11 +314,10 @@ function computeAccess(
 
   if (status === "gracia") {
     const today = utcTodayStr();
-    const base = subscription.next_billing_date ?? today;
-    const graceUntil = addDays(base, graceDays);
-    const todayDt = parseDateUTC(today)!;
-    const untilDt = parseDateUTC(graceUntil)!;
-    const allowed = todayDt.getTime() <= untilDt.getTime();
+    const baseDate = subscription.next_billing_date ?? today;
+    const graceUntil = addDays(baseDate, graceDays);
+    const allowed = parseDateUTC(today)!.getTime() <= parseDateUTC(graceUntil)!.getTime();
+
     return {
       allowed,
       reason: allowed ? "grace_ok" : "grace_expired",
@@ -272,11 +328,13 @@ function computeAccess(
   return { allowed: false, reason: "unknown_status" };
 }
 
-export async function resolveWaContext(supabase: SupabaseClient, phone: string): Promise<WaContext> {
+async function resolveUserAndAccessWithClient(
+  supabase: SupabaseClient,
+  phone: string,
+): Promise<ResolvedUserAndAccess> {
   const user = await fetchUserByPhone(supabase, phone);
   if (!user) {
     return {
-      phone,
       exists: false,
       user: null,
       subscription: null,
@@ -291,7 +349,6 @@ export async function resolveWaContext(supabase: SupabaseClient, phone: string):
   const access = computeAccess(subscription, graceDays, true);
 
   return {
-    phone,
     exists: true,
     user,
     subscription,
@@ -300,12 +357,60 @@ export async function resolveWaContext(supabase: SupabaseClient, phone: string):
   };
 }
 
+export async function resolveUserAndAccess(phone: string): Promise<ResolvedUserAndAccess> {
+  return resolveUserAndAccessWithClient(getSupabaseAdmin(), phone);
+}
+
+export async function requireAllowed(phone: string): Promise<ResolvedUserAndAccess> {
+  const resolved = await resolveUserAndAccess(phone);
+  if (!resolved.exists || !resolved.user) {
+    throwHttp(404, "user_not_found", "User not found for phone", { phone });
+  }
+  if (!resolved.access.allowed) {
+    throwHttp(403, "forbidden", "Access denied by subscription status", {
+      phone,
+      reason: resolved.access.reason,
+      grace_until: resolved.access.grace_until,
+    });
+  }
+  return resolved;
+}
+
+export async function audit(
+  entity_type: "user" | "crop" | "expense",
+  entity_id: string | number,
+  action: string,
+  detail: Record<string, unknown>,
+  result: "ok" | "error",
+): Promise<void> {
+  try {
+    const supabase = getSupabaseAdmin();
+    await supabase.from("audit_logs").insert({
+      entity_type,
+      entity_id: String(entity_id),
+      action,
+      detail,
+      result,
+      actor_admin_id: null,
+    });
+  } catch {
+    // Best-effort only.
+  }
+}
+
+// Backward-compatible alias used by existing functions.
+export async function resolveWaContext(supabase: SupabaseClient, phone: string): Promise<WaContext> {
+  const resolved = await resolveUserAndAccessWithClient(supabase, phone);
+  return { phone, ...resolved };
+}
+
+// Backward-compatible alias used by existing functions.
 export async function insertAuditLog(
   supabase: SupabaseClient,
   params: {
     entity_type: "user" | "crop" | "expense";
     entity_id: string;
-    action: "create" | "update" | "delete" | "finalize";
+    action: string;
     detail: Record<string, unknown>;
     result: "ok" | "error";
     actor_admin_id?: string | null;
@@ -321,7 +426,7 @@ export async function insertAuditLog(
       actor_admin_id: params.actor_admin_id ?? null,
     });
   } catch {
-    // Best-effort: never fail the business operation because audit insert failed.
+    // Best-effort only.
   }
 }
 
@@ -330,10 +435,13 @@ export async function getCropOwnedByUser(
   userId: string,
   cropId: string | number,
 ): Promise<CropRow | null> {
+  const parsedCropId = coercePositiveIntId(cropId);
+  if (!parsedCropId.ok) return null;
+
   const { data, error } = await supabase
     .from("crops")
-    .select("id, created_at, description, size, start_date, end_date, user")
-    .eq("id", cropId)
+    .select("id, created_at, description, size, budget, gross_profit, start_date, end_date, user")
+    .eq("id", parsedCropId.value)
     .eq("user", userId)
     .maybeSingle();
   if (error) throw error;
@@ -344,10 +452,13 @@ export async function expenseTypeExists(
   supabase: SupabaseClient,
   expenseTypeId: string | number,
 ): Promise<boolean> {
+  const parsedExpenseTypeId = coercePositiveIntId(expenseTypeId);
+  if (!parsedExpenseTypeId.ok) return false;
+
   const { data, error } = await supabase
     .from("expenses_type")
     .select("id")
-    .eq("id", expenseTypeId)
+    .eq("id", parsedExpenseTypeId.value)
     .maybeSingle();
   if (error) throw error;
   return !!data;
@@ -358,18 +469,47 @@ export async function getExpenseOwnedByUser(
   userId: string,
   expenseId: string | number,
 ): Promise<ExpenseRow | null> {
+  const parsedExpenseId = coercePositiveIntId(expenseId);
+  if (!parsedExpenseId.ok) return null;
+
   const { data, error } = await supabase
     .from("expenses")
     .select("id, created_at, description, expense_type, amount, crop_id")
-    .eq("id", expenseId)
+    .eq("id", parsedExpenseId.value)
     .maybeSingle();
   if (error) throw error;
-  const exp = (data as ExpenseRow) ?? null;
-  if (!exp || exp.crop_id == null) return null;
 
-  const crop = await getCropOwnedByUser(supabase, userId, exp.crop_id);
+  const expense = (data as ExpenseRow) ?? null;
+  if (!expense || expense.crop_id == null) return null;
+
+  const crop = await getCropOwnedByUser(supabase, userId, expense.crop_id);
   if (!crop) return null;
-  return exp;
+  return expense;
+}
+
+export async function computeCropBudgetStatus(
+  supabase: SupabaseClient,
+  cropId: number,
+  budget: number,
+): Promise<CropBudgetStatus> {
+  const { data, error } = await supabase
+    .from("expenses")
+    .select("amount")
+    .eq("crop_id", cropId);
+  if (error) throw error;
+
+  const totalSpent = (data ?? []).reduce((sum, row: any) => {
+    return sum + (isNumber(row?.amount) ? row.amount : 0);
+  }, 0);
+
+  const remainingBudget = budget - totalSpent;
+  return {
+    crop_id: cropId,
+    budget,
+    total_spent: totalSpent,
+    remaining_budget: remainingBudget,
+    over_budget: remainingBudget < 0,
+  };
 }
 
 export async function waHandler(
@@ -379,29 +519,37 @@ export async function waHandler(
 ): Promise<Response> {
   if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: CORS_HEADERS });
 
-  const authErr = checkAgentKey(req);
-  if (authErr) return authErr;
+  try {
+    requireInternalKey(req);
+  } catch (error) {
+    return toErrorResponse(error);
+  }
 
   const { body, error } = await safeJson(req);
   if (error) return error;
 
-  const rawPhone = req.headers.get("x-wa-phone") ?? body?.phone;
-  const phone = normalizePhone(rawPhone);
-  if (!phone) return jsonErr(400, "invalid_phone", "Missing or invalid phone (x-wa-phone or body.phone)");
+  let phone = "";
+  try {
+    phone = getPhone(req, body);
+  } catch (phoneError) {
+    return toErrorResponse(phoneError);
+  }
 
   let supabase: SupabaseClient;
   try {
     supabase = getSupabaseAdmin();
-  } catch (e) {
-    return jsonErr(500, "missing_env", "Missing Supabase env vars", String(e));
+  } catch (envError) {
+    return jsonErr(500, "missing_env", "Missing Supabase env vars", String(envError));
   }
 
   try {
-    const ctx = await resolveWaContext(supabase, phone);
+    const resolved = await resolveUserAndAccessWithClient(supabase, phone);
+    const ctx: WaContext = { phone, ...resolved };
 
     if (opts.requireUser && !ctx.user) {
       return jsonErr(404, "user_not_found", "User not found for phone", { phone });
     }
+
     if (opts.requireAllowed && !ctx.access.allowed) {
       return jsonErr(403, "forbidden", "Access denied by subscription status", {
         phone,
@@ -411,7 +559,7 @@ export async function waHandler(
     }
 
     return await handler({ req, supabase, phone, body, ctx });
-  } catch (e) {
-    return jsonErr(500, "internal_error", "Unhandled error", String(e));
+  } catch (handlerError) {
+    return toErrorResponse(handlerError);
   }
 }

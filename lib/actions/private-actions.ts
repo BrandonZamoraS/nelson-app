@@ -13,6 +13,12 @@ import {
   createUserWithSubscription,
   updateUserAndSubscription,
 } from "@/lib/data/users";
+import {
+  DEFAULT_CREATE_USER_FORM_VALUES,
+  buildUserFormErrorRedirect,
+  getFirstZodIssueMessage,
+  readUserFormValues,
+} from "@/lib/users/form-state";
 import { createUserInputSchema, updateUserInputSchema } from "@/lib/validators/users";
 import { patchSubscriptionStatusInputSchema } from "@/lib/validators/subscriptions";
 import {
@@ -27,19 +33,20 @@ function asNullableDate(raw: FormDataEntryValue | null) {
 
 export async function createUserAction(formData: FormData) {
   const actor = await requirePageSession();
+  const values = readUserFormValues(formData, DEFAULT_CREATE_USER_FORM_VALUES);
   const parsed = createUserInputSchema.safeParse({
-    full_name: formData.get("full_name"),
-    whatsapp: formData.get("whatsapp"),
-    plan: formData.get("plan"),
-    amount_cents: formData.get("amount_cents"),
-    status: formData.get("status"),
-    start_date: formData.get("start_date"),
+    ...values,
     next_billing_date: asNullableDate(formData.get("next_billing_date")),
-    source: formData.get("source"),
   });
 
   if (!parsed.success) {
-    redirect("/usuarios?modal=create&error=Datos invalidos.");
+    redirect(
+      buildUserFormErrorRedirect({
+        mode: "create",
+        error: getFirstZodIssueMessage(parsed.error),
+        values,
+      }),
+    );
   }
 
   try {
@@ -50,27 +57,35 @@ export async function createUserAction(formData: FormData) {
     redirect("/usuarios?success=Usuario creado.");
   } catch (error) {
     const message = error instanceof Error ? error.message : "Error inesperado";
-    redirect(`/usuarios?modal=create&error=${encodeURIComponent(message)}`);
+    redirect(
+      buildUserFormErrorRedirect({
+        mode: "create",
+        error: message,
+        values,
+      }),
+    );
   }
 }
 
 export async function updateUserAction(formData: FormData) {
   const actor = await requirePageSession();
   const userId = String(formData.get("user_id") ?? "").trim();
+  const values = readUserFormValues(formData, DEFAULT_CREATE_USER_FORM_VALUES);
 
   const parsed = updateUserInputSchema.safeParse({
-    full_name: formData.get("full_name"),
-    whatsapp: formData.get("whatsapp"),
-    plan: formData.get("plan"),
-    amount_cents: formData.get("amount_cents"),
-    status: formData.get("status"),
-    start_date: formData.get("start_date"),
+    ...values,
     next_billing_date: asNullableDate(formData.get("next_billing_date")),
-    source: formData.get("source"),
   });
 
   if (!userId || !parsed.success) {
-    redirect(`/usuarios?modal=edit&id=${userId}&error=Datos invalidos.`);
+    redirect(
+      buildUserFormErrorRedirect({
+        mode: "edit",
+        error: parsed.success ? "Usuario invalido." : getFirstZodIssueMessage(parsed.error),
+        values,
+        userId,
+      }),
+    );
   }
 
   try {
@@ -82,7 +97,12 @@ export async function updateUserAction(formData: FormData) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Error inesperado";
     redirect(
-      `/usuarios?modal=edit&id=${userId}&error=${encodeURIComponent(message)}`,
+      buildUserFormErrorRedirect({
+        mode: "edit",
+        error: message,
+        values,
+        userId,
+      }),
     );
   }
 }

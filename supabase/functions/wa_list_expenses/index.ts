@@ -1,14 +1,20 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { coercePositiveIntId } from "../../../lib/utils/coerce-id.ts";
 import { getCropOwnedByUser, jsonErr, jsonOk, waHandler } from "../_shared/wa.ts";
 
 serve((req) =>
   waHandler(req, { requireUser: true, requireAllowed: true }, async ({ supabase, ctx, body }) => {
     const user = ctx.user!;
 
-    const cropId = body?.crop_id ?? null;
+    const cropIdRaw = body?.crop_id ?? null;
     let cropIds: Array<string | number> = [];
 
-    if (cropId !== null && cropId !== undefined && cropId !== "") {
+    if (cropIdRaw !== null && cropIdRaw !== undefined && cropIdRaw !== "") {
+      const parsedCropId = coercePositiveIntId(cropIdRaw);
+      if (!parsedCropId.ok) {
+        return jsonErr(400, "invalid_crop_id", "crop_id must be a positive integer", { crop_id: cropIdRaw });
+      }
+      const cropId = parsedCropId.value;
       const owned = await getCropOwnedByUser(supabase, user.id, cropId);
       if (!owned) return jsonErr(404, "crop_not_found", "Crop not found");
       cropIds = [cropId];
@@ -51,4 +57,3 @@ serve((req) =>
     return jsonOk({ expenses: out });
   })
 );
-

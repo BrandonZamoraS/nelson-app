@@ -7,7 +7,7 @@ serve((req) =>
 
     const { data, error } = await supabase
       .from("crops")
-      .select("id, created_at, description, size, start_date, end_date")
+      .select("id, created_at, description, size, budget, start_date, end_date")
       .eq("user", user.id)
       .order("created_at", { ascending: false });
     if (error) return jsonErr(500, "db_error", "Failed to list crops", error);
@@ -15,4 +15,3 @@ serve((req) =>
     return jsonOk({ crops: data ?? [] });
   })
 );
-

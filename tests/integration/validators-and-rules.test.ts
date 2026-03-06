@@ -9,7 +9,7 @@ import { auditFilterInputSchema } from "@/lib/validators/audit";
 test("createUserInputSchema accepts valid payload", () => {
   const parsed = createUserInputSchema.safeParse({
     full_name: "Maria Lopez",
-    whatsapp: "+5493514558821",
+    whatsapp: "+14155552671",
     plan: "Mensual",
     amount_cents: 250000,
     status: "activa",

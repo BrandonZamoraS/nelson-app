@@ -48,3 +48,8 @@ node_modules/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+
+# local Supabase edge functions not intended for GitHub
+/supabase/functions/wa_compare_finished_crops_costs/
+/supabase/functions/wa_crop_budget_status/
+/supabase/functions/wa_crop_report_data/

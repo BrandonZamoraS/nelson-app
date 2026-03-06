@@ -9,6 +9,10 @@ import {
 } from "@/lib/actions/private-actions";
 import { getUserById, listUsers } from "@/lib/data/users";
 import { SUBSCRIPTION_STATUSES } from "@/lib/types/domain";
+import {
+  DEFAULT_CREATE_USER_FORM_VALUES,
+  readUserFormValues,
+} from "@/lib/users/form-state";
 import { formatCurrencyCents, formatDate } from "@/lib/utils/format";
 import { listUsersInputSchema } from "@/lib/validators/users";
 
@@ -42,6 +46,22 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
   const modal = asString(params.modal);
   const success = asString(params.success);
   const error = asString(params.error);
+  const createFormValues = readUserFormValues(
+    params,
+    DEFAULT_CREATE_USER_FORM_VALUES,
+  );
+  const editFormValues = selected
+    ? readUserFormValues(params, {
+        full_name: selected.user.full_name,
+        whatsapp: selected.user.whatsapp,
+        plan: selected.subscription?.plan ?? "manual",
+        amount_cents: String(selected.subscription?.amount_cents ?? 19800),
+        status: selected.subscription?.status ?? "activa",
+        start_date: selected.subscription?.start_date ?? "",
+        next_billing_date: selected.subscription?.next_billing_date ?? "",
+        source: selected.subscription?.source ?? "manual",
+      })
+    : null;
 
   return (
     <PrivateShell
@@ -122,17 +142,27 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
 
       {modal === "create" ? (
         <Modal title="Crear usuario" closeHref="/usuarios">
+          {error ? <FlashMessage kind="error" message={error} /> : null}
           <form action={createUserAction} className="stack-form">
-            <input type="hidden" name="source" value="manual" />
-            <input type="hidden" name="plan" value="manual" />
-            <input type="hidden" name="status" value="activa" />
+            <input type="hidden" name="source" value={createFormValues.source} />
+            <input type="hidden" name="plan" value={createFormValues.plan} />
+            <input type="hidden" name="status" value={createFormValues.status} />
             <label className="field">
               <span>Nombre completo</span>
-              <input name="full_name" required minLength={3} />
+              <input
+                name="full_name"
+                defaultValue={createFormValues.full_name}
+                required
+                minLength={3}
+              />
             </label>
             <div className="field">
               <span>WhatsApp</span>
-              <PhoneInput name="whatsapp" required />
+              <PhoneInput
+                name="whatsapp"
+                defaultValue={createFormValues.whatsapp}
+                required
+              />
             </div>
             <label className="field">
               <span>Monto (centavos USD)</span>
@@ -141,17 +171,26 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                 type="number"
                 min={1}
                 step={1}
-                defaultValue={19800}
+                defaultValue={createFormValues.amount_cents}
                 required
               />
             </label>
             <label className="field">
               <span>Fecha inicio</span>
-              <input name="start_date" type="date" required />
+              <input
+                name="start_date"
+                type="date"
+                defaultValue={createFormValues.start_date}
+                required
+              />
             </label>
             <label className="field">
               <span>Proximo cobro</span>
-              <input name="next_billing_date" type="date" />
+              <input
+                name="next_billing_date"
+                type="date"
+                defaultValue={createFormValues.next_billing_date}
+              />
             </label>
             <button type="submit" className="button button-primary">
               Guardar
@@ -187,15 +226,16 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
 
       {modal === "edit" && selected ? (
         <Modal title="Editar usuario" closeHref="/usuarios">
+          {error ? <FlashMessage kind="error" message={error} /> : null}
           <form action={updateUserAction} className="stack-form">
             <input type="hidden" name="user_id" value={selected.user.id} />
-            <input type="hidden" name="source" value="manual" />
-            <input type="hidden" name="plan" value="manual" />
+            <input type="hidden" name="source" value={editFormValues?.source ?? "manual"} />
+            <input type="hidden" name="plan" value={editFormValues?.plan ?? "manual"} />
             <label className="field">
               <span>Nombre completo</span>
               <input
                 name="full_name"
-                defaultValue={selected.user.full_name}
+                defaultValue={editFormValues?.full_name ?? selected.user.full_name}
                 required
                 minLength={3}
               />
@@ -204,7 +244,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
               <span>WhatsApp</span>
               <PhoneInput
                 name="whatsapp"
-                defaultValue={selected.user.whatsapp}
+                defaultValue={editFormValues?.whatsapp ?? selected.user.whatsapp}
                 required
               />
             </div>
@@ -215,13 +255,23 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                 type="number"
                 min={1}
                 step={1}
-                defaultValue={selected.subscription?.amount_cents ?? 19800}
+                defaultValue={
+                  editFormValues?.amount_cents ??
+                  String(selected.subscription?.amount_cents ?? 19800)
+                }
                 required
               />
             </label>
             <label className="field">
               <span>Estado</span>
-              <select name="status" defaultValue={selected.subscription?.status}>
+              <select
+                name="status"
+                defaultValue={
+                  editFormValues?.status ??
+                  selected.subscription?.status ??
+                  "activa"
+                }
+              >
                 {SUBSCRIPTION_STATUSES.map((status) => (
                   <option key={status} value={status}>
                     {status}
@@ -234,7 +284,11 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
               <input
                 name="start_date"
                 type="date"
-                defaultValue={selected.subscription?.start_date ?? ""}
+                defaultValue={
+                  editFormValues?.start_date ??
+                  selected.subscription?.start_date ??
+                  ""
+                }
                 required
               />
             </label>
@@ -243,7 +297,11 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
               <input
                 name="next_billing_date"
                 type="date"
-                defaultValue={selected.subscription?.next_billing_date ?? ""}
+                defaultValue={
+                  editFormValues?.next_billing_date ??
+                  selected.subscription?.next_billing_date ??
+                  ""
+                }
               />
             </label>
             <button type="submit" className="button button-primary">

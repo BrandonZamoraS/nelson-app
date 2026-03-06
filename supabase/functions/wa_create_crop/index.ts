@@ -1,18 +1,23 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { insertAuditLog, isISODate, isNumber, jsonErr, jsonOk, waHandler } from "../_shared/wa.ts";
+import { coerceOptionalFiniteNumber, coercePositiveFiniteNumber } from "../../../lib/utils/coerce-number.ts";
+import { insertAuditLog, isISODate, jsonErr, jsonOk, waHandler } from "../_shared/wa.ts";
 
 serve((req) =>
   waHandler(req, { requireUser: true, requireAllowed: true }, async ({ supabase, phone, ctx, body }) => {
     const user = ctx.user!;
+    const parsedSize = coerceOptionalFiniteNumber(body?.size);
+    const budgetRaw = body?.budget;
+    const parsedBudget = coercePositiveFiniteNumber(budgetRaw);
 
     const payload = {
       description: typeof body?.description === "string" ? body.description : null,
-      size: body?.size === null || body?.size === undefined ? null : body.size,
+      size: parsedSize.ok ? parsedSize.value : body?.size,
+      budget: parsedBudget.ok ? parsedBudget.value : budgetRaw,
       start_date: body?.start_date ?? null,
       end_date: body?.end_date ?? null,
     };
 
-    if (payload.size !== null && !isNumber(payload.size)) {
+    if (!parsedSize.ok) {
       await insertAuditLog(supabase, {
         entity_type: "crop",
         entity_id: "(new)",
@@ -21,6 +26,26 @@ serve((req) =>
         detail: { phone, payload, error: "invalid_size" },
       });
       return jsonErr(400, "invalid_size", "size must be a number", { size: payload.size });
+    }
+    if (budgetRaw === undefined || budgetRaw === null || budgetRaw === "") {
+      await insertAuditLog(supabase, {
+        entity_type: "crop",
+        entity_id: "(new)",
+        action: "create",
+        result: "error",
+        detail: { phone, payload, error: "missing_budget" },
+      });
+      return jsonErr(400, "missing_budget", "budget is required");
+    }
+    if (!parsedBudget.ok) {
+      await insertAuditLog(supabase, {
+        entity_type: "crop",
+        entity_id: "(new)",
+        action: "create",
+        result: "error",
+        detail: { phone, payload, error: "invalid_budget" },
+      });
+      return jsonErr(400, "invalid_budget", "budget must be a number > 0", { budget: budgetRaw });
     }
     if (payload.start_date !== null && !isISODate(payload.start_date)) {
       await insertAuditLog(supabase, {
@@ -49,10 +74,11 @@ serve((req) =>
         user: user.id,
         description: payload.description,
         size: payload.size,
+        budget: parsedBudget.value,
         start_date: payload.start_date,
         end_date: payload.end_date,
       })
-      .select("id, created_at, description, size, start_date, end_date")
+      .select("id, created_at, description, size, budget, start_date, end_date")
       .single();
 
     if (error) {
@@ -77,4 +103,3 @@ serve((req) =>
     return jsonOk({ crop: data });
   })
 );
-

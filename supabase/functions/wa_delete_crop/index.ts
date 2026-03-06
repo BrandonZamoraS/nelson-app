@@ -1,13 +1,19 @@
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
+import { coercePositiveIntId } from "../../../lib/utils/coerce-id.ts";
 import { getCropOwnedByUser, insertAuditLog, jsonErr, jsonOk, waHandler } from "../_shared/wa.ts";
 
 serve((req) =>
   waHandler(req, { requireUser: true, requireAllowed: true }, async ({ supabase, phone, ctx, body }) => {
     const user = ctx.user!;
-    const cropId = body?.crop_id ?? body?.id;
-    if (cropId === undefined || cropId === null || cropId === "") {
+    const cropIdRaw = body?.crop_id ?? body?.id;
+    if (cropIdRaw === undefined || cropIdRaw === null || cropIdRaw === "") {
       return jsonErr(400, "missing_crop_id", "crop_id is required");
     }
+    const parsedCropId = coercePositiveIntId(cropIdRaw);
+    if (!parsedCropId.ok) {
+      return jsonErr(400, "invalid_crop_id", "crop_id must be a positive integer", { crop_id: cropIdRaw });
+    }
+    const cropId = parsedCropId.value;
 
     const existing = await getCropOwnedByUser(supabase, user.id, cropId);
     if (!existing) {
@@ -44,4 +50,3 @@ serve((req) =>
     return jsonOk({ deleted: { id: String(cropId) } });
   })
 );
-
