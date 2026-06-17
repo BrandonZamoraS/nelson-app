@@ -13,6 +13,8 @@ import {
   waHandler,
 } from "../_shared/wa.ts";
 
+type CreatedExpense = { id: string | number };
+
 serve((req) =>
   waHandler(req, { requireUser: true, requireAllowed: true }, async ({ supabase, phone, ctx, body }) => {
     const user = ctx.user!;
@@ -126,7 +128,7 @@ serve((req) =>
     } catch (statusError) {
       await insertAuditLog(supabase, {
         entity_type: "expense",
-        entity_id: String((data as any).id),
+        entity_id: String((data as CreatedExpense).id),
         action: "create",
         result: "error",
         detail: { phone, payload, error: "budget_status_error", status_error: String(statusError) },
@@ -136,7 +138,7 @@ serve((req) =>
 
     await insertAuditLog(supabase, {
       entity_type: "expense",
-      entity_id: String((data as any).id),
+      entity_id: String((data as CreatedExpense).id),
       action: "create",
       result: "ok",
       detail: { phone, payload, budget_status: budgetStatus },

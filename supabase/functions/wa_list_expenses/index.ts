@@ -2,6 +2,17 @@ import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { coercePositiveIntId } from "../../../lib/utils/coerce-id.ts";
 import { getCropOwnedByUser, jsonErr, jsonOk, waHandler } from "../_shared/wa.ts";
 
+type CropIdRow = { id: string | number };
+type ExpenseRow = {
+  id: string | number;
+  created_at: string;
+  description: string | null;
+  amount: number | null;
+  crop_id: string | number | null;
+  expense_type: string | number | null;
+};
+type ExpenseTypeRow = { id: string | number; description: string | null };
+
 serve((req) =>
   waHandler(req, { requireUser: true, requireAllowed: true }, async ({ supabase, ctx, body }) => {
     const user = ctx.user!;
@@ -24,7 +35,7 @@ serve((req) =>
         .select("id")
         .eq("user", user.id);
       if (cropsErr) return jsonErr(500, "db_error", "Failed to resolve user crops", cropsErr);
-      cropIds = (crops ?? []).map((c: any) => c.id);
+      cropIds = ((crops ?? []) as CropIdRow[]).map((c) => c.id);
     }
 
     if (cropIds.length === 0) return jsonOk({ expenses: [] });
@@ -37,7 +48,11 @@ serve((req) =>
     if (expErr) return jsonErr(500, "db_error", "Failed to list expenses", expErr);
 
     const typeIds = Array.from(
-      new Set((expenses ?? []).map((e: any) => e.expense_type).filter((id: any) => id !== null && id !== undefined)),
+      new Set(
+        ((expenses ?? []) as ExpenseRow[])
+          .map((e) => e.expense_type)
+          .filter((id): id is string | number => id !== null && id !== undefined),
+      ),
     );
     const typeMap = new Map<string, string>();
     if (typeIds.length > 0) {
@@ -46,10 +61,12 @@ serve((req) =>
         .select("id, description")
         .in("id", typeIds);
       if (typesErr) return jsonErr(500, "db_error", "Failed to resolve expense types", typesErr);
-      for (const t of types ?? []) typeMap.set(String((t as any).id), (t as any).description);
+      for (const t of (types ?? []) as ExpenseTypeRow[]) {
+        typeMap.set(String(t.id), t.description ?? "");
+      }
     }
 
-    const out = (expenses ?? []).map((e: any) => ({
+    const out = ((expenses ?? []) as ExpenseRow[]).map((e) => ({
       ...e,
       expense_type_description: e.expense_type == null ? null : (typeMap.get(String(e.expense_type)) ?? null),
     }));

@@ -27,6 +27,12 @@ function asString(value: string | string[] | undefined) {
   return value ?? "";
 }
 
+function formatAmountCentsForInput(amountCents: number) {
+  return amountCents % 100 === 0
+    ? String(amountCents / 100)
+    : (amountCents / 100).toFixed(2);
+}
+
 export default async function UsersPage({ searchParams }: UsersPageProps) {
   const params = await searchParams;
   const parsed = listUsersInputSchema.safeParse({
@@ -56,7 +62,9 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
         whatsapp: selected.user.whatsapp,
         whatsapp_country: "AR",
         plan: selected.subscription?.plan ?? "manual",
-        amount_cents: String(selected.subscription?.amount_cents ?? 19800),
+        amount_cents: formatAmountCentsForInput(
+          selected.subscription?.amount_cents ?? 19800,
+        ),
         status: selected.subscription?.status ?? "activa",
         start_date: selected.subscription?.start_date ?? "",
         next_billing_date: selected.subscription?.next_billing_date ?? "",
@@ -169,12 +177,11 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
               />
             </div>
             <label className="field">
-              <span>Monto (centavos USD)</span>
+              <span>Monto mensual USD</span>
               <input
                 name="amount_cents"
-                type="number"
-                min={1}
-                step={1}
+                inputMode="decimal"
+                pattern="\d+([,.]\d{1,2})?"
                 defaultValue={createFormValues.amount_cents}
                 required
               />
@@ -257,15 +264,14 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
               />
             </div>
             <label className="field">
-              <span>Monto (centavos USD)</span>
+              <span>Monto mensual USD</span>
               <input
                 name="amount_cents"
-                type="number"
-                min={1}
-                step={1}
+                inputMode="decimal"
+                pattern="\d+([,.]\d{1,2})?"
                 defaultValue={
                   editFormValues?.amount_cents ??
-                  String(selected.subscription?.amount_cents ?? 19800)
+                  formatAmountCentsForInput(selected.subscription?.amount_cents ?? 19800)
                 }
                 required
               />
