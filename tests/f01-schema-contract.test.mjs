@@ -40,7 +40,7 @@ test("F01 seed exists and seeds app_settings defaults", () => {
 
   const sql = readFileOrEmpty(seedPath);
   assert.match(sql, /insert into public\.app_settings/i);
-  assert.match(sql, /'America\/Argentina\/Buenos_Aires'/i);
-  assert.match(sql, /'DD\/MM\/YYYY'/i);
+  assert.doesNotMatch(sql, /\btimezone\b/i);
+  assert.doesNotMatch(sql, /\bdate_format\b/i);
   assert.doesNotMatch(sql, /\bcurrency\b/i);
 });
