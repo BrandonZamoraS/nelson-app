@@ -22,6 +22,10 @@ const actionLabels: Record<string, string> = {
   reactivate: "Reactivación",
   terminate: "Finalización",
   sync: "Sincronización",
+  "settings.update": "Actualización de configuración",
+  "subscription.status.change": "Cambio de estado de suscripción",
+  "user.create": "Creación de usuario",
+  "user.update": "Actualización de usuario",
 };
 
 const entityLabels: Record<string, string> = {
@@ -31,6 +35,9 @@ const entityLabels: Record<string, string> = {
   subscriptions: "Suscripción",
   payment: "Pago",
   payments: "Pago",
+  crop: "Cultivo",
+  expense: "Gasto",
+  sale: "Venta",
   settings: "Configuración",
 };
 
@@ -42,6 +49,8 @@ const detailLabels: Record<string, string> = {
   amount_cents: "Monto",
   currency: "Moneda",
   source: "Origen",
+  previous_status: "Estado anterior",
+  target_status: "Nuevo estado",
   next_billing_date: "Próximo cobro",
   grace_days: "Días de gracia",
   payment_reminder_template: "Recordatorio de pago",
@@ -77,22 +86,40 @@ function formatDetailValue(key: string, value: unknown) {
   return String(value);
 }
 
-function formatAuditDetails(detail: Record<string, unknown>) {
-  const readableEntries = Object.entries(detail).filter(
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function formatReference(entityId: string) {
+  const shortId = entityId.length > 12 ? `${entityId.slice(0, 8)}...` : entityId;
+  return `Referencia: ${shortId}`;
+}
+
+function formatAuditDetails(detail: Record<string, unknown>, entityId: string) {
+  const safeDetail = isRecord(detail) ? detail : {};
+  const readableEntries = Object.entries(safeDetail).filter(
     ([key]) => !key.endsWith("_id") && key !== "actor_auth_id",
   );
 
+  const hasReadableIdentifier = Object.keys(safeDetail).some(
+    (key) => key === "full_name" || key === "whatsapp" || key.endsWith("_name"),
+  );
+
+  const reference = hasReadableIdentifier ? null : formatReference(entityId);
+
   if (readableEntries.length === 0) {
-    return "Cambio registrado";
+    return reference ?? "Cambio registrado";
   }
 
-  return readableEntries
+  const details = readableEntries
     .slice(0, 3)
     .map(([key, value]) => {
       const label = detailLabels[key] ?? humanize(key);
       return `${label}: ${formatDetailValue(key, value)}`;
     })
     .join(" · ");
+
+  return reference ? `${details} · ${reference}` : details;
 }
 
 export default async function AuditPage({ searchParams }: AuditPageProps) {
@@ -164,7 +191,7 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
                   <td data-label="Entidad">
                     {entityLabels[row.entity_type] ?? humanize(row.entity_type)}
                   </td>
-                  <td data-label="Datos">{formatAuditDetails(row.detail)}</td>
+                  <td data-label="Datos">{formatAuditDetails(row.detail, row.entity_id)}</td>
                   <td data-label="Resultado">
                     <span className={row.result === "ok" ? "badge badge-active" : "badge badge-critical"}>
                       {row.result === "ok" ? "Correcto" : "Error"}
