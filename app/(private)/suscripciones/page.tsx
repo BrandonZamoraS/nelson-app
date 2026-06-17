@@ -3,10 +3,7 @@ import { FlashMessage } from "@/components/ui/flash-message";
 import { Modal } from "@/components/ui/modal";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { SubscriptionStatusChanger } from "@/components/ui/subscription-status-changer";
-import {
-  changeSubscriptionStatusAction,
-  terminateSubscriptionAction,
-} from "@/lib/actions/private-actions";
+import { terminateSubscriptionAction } from "@/lib/actions/private-actions";
 import { listSubscriptions } from "@/lib/data/subscriptions";
 import { SUBSCRIPTION_STATUSES } from "@/lib/types/domain";
 import { formatCurrencyCents, formatDate } from "@/lib/utils/format";

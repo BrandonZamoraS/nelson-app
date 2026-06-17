@@ -61,9 +61,11 @@ type HandlerArgs = {
   req: Request;
   supabase: SupabaseClient;
   phone: string;
-  body: any;
+  body: WaRequestBody;
   ctx: WaContext;
 };
+
+type WaRequestBody = Record<string, unknown> | null;
 
 export type CropRow = {
   id: number;
@@ -214,7 +216,7 @@ export function isPositiveFiniteNumber(input: unknown): input is number {
   return isNumber(input) && input > 0;
 }
 
-async function safeJson(req: Request): Promise<{ body: any; error: Response | null }> {
+async function safeJson(req: Request): Promise<{ body: WaRequestBody; error: Response | null }> {
   if (req.method === "GET" || req.method === "HEAD") return { body: null, error: null };
 
   const contentType = req.headers.get("content-type") ?? "";
@@ -248,7 +250,7 @@ export function requireInternalKey(req: Request): void {
   }
 }
 
-export function getPhone(req: Request, body?: any): string {
+export function getPhone(req: Request, body?: WaRequestBody): string {
   const rawPhone = req.headers.get("x-wa-phone") ?? body?.phone;
   const phone = normalizePhone(rawPhone);
   if (!phone) {
@@ -498,7 +500,7 @@ export async function computeCropBudgetStatus(
     .eq("crop_id", cropId);
   if (error) throw error;
 
-  const totalSpent = (data ?? []).reduce((sum, row: any) => {
+  const totalSpent = ((data ?? []) as Array<{ amount: unknown }>).reduce((sum, row) => {
     return sum + (isNumber(row?.amount) ? row.amount : 0);
   }, 0);
 

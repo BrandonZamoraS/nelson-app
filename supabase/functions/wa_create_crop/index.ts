@@ -2,6 +2,8 @@ import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { coerceOptionalFiniteNumber, coercePositiveFiniteNumber } from "../../../lib/utils/coerce-number.ts";
 import { insertAuditLog, isISODate, jsonErr, jsonOk, waHandler } from "../_shared/wa.ts";
 
+type CreatedCrop = { id: string | number };
+
 serve((req) =>
   waHandler(req, { requireUser: true, requireAllowed: true }, async ({ supabase, phone, ctx, body }) => {
     const user = ctx.user!;
@@ -94,7 +96,7 @@ serve((req) =>
 
     await insertAuditLog(supabase, {
       entity_type: "crop",
-      entity_id: String((data as any).id),
+        entity_id: String((data as CreatedCrop).id),
       action: "create",
       result: "ok",
       detail: { phone, payload: { ...payload, user_id: user.id } },
