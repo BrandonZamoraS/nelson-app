@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { redirect } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
 
 import { requirePageSession } from "@/lib/auth/guard";
 import { patchSettings, updateAdminPassword } from "@/lib/data/settings";
@@ -19,7 +19,10 @@ import {
   getFirstZodIssueMessage,
   readUserFormValues,
 } from "@/lib/users/form-state";
-import { createUserInputSchema, updateUserInputSchema } from "@/lib/validators/users";
+import {
+  createUserFormInputSchema,
+  updateUserFormInputSchema,
+} from "@/lib/validators/users";
 import { patchSubscriptionStatusInputSchema } from "@/lib/validators/subscriptions";
 import {
   updatePasswordInputSchema,
@@ -31,10 +34,16 @@ function asNullableDate(raw: FormDataEntryValue | null) {
   return value.length > 0 ? value : null;
 }
 
+function getActionErrorMessage(error: unknown) {
+  unstable_rethrow(error);
+
+  return error instanceof Error ? error.message : "Error inesperado";
+}
+
 export async function createUserAction(formData: FormData) {
   const actor = await requirePageSession();
   const values = readUserFormValues(formData, DEFAULT_CREATE_USER_FORM_VALUES);
-  const parsed = createUserInputSchema.safeParse({
+  const parsed = createUserFormInputSchema.safeParse({
     ...values,
     whatsapp_country: formData.get("whatsapp_country") ?? values.whatsapp_country,
     next_billing_date: asNullableDate(formData.get("next_billing_date")),
@@ -55,9 +64,8 @@ export async function createUserAction(formData: FormData) {
     revalidatePath("/usuarios");
     revalidatePath("/suscripciones");
     revalidatePath("/");
-    redirect("/usuarios?success=Usuario creado.");
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Error inesperado";
+    const message = getActionErrorMessage(error);
     redirect(
       buildUserFormErrorRedirect({
         mode: "create",
@@ -66,6 +74,8 @@ export async function createUserAction(formData: FormData) {
       }),
     );
   }
+
+  redirect("/usuarios?success=Usuario creado.");
 }
 
 export async function updateUserAction(formData: FormData) {
@@ -73,7 +83,7 @@ export async function updateUserAction(formData: FormData) {
   const userId = String(formData.get("user_id") ?? "").trim();
   const values = readUserFormValues(formData, DEFAULT_CREATE_USER_FORM_VALUES);
 
-  const parsed = updateUserInputSchema.safeParse({
+  const parsed = updateUserFormInputSchema.safeParse({
     ...values,
     whatsapp_country: formData.get("whatsapp_country") ?? values.whatsapp_country,
     next_billing_date: asNullableDate(formData.get("next_billing_date")),
@@ -95,9 +105,8 @@ export async function updateUserAction(formData: FormData) {
     revalidatePath("/usuarios");
     revalidatePath("/suscripciones");
     revalidatePath("/");
-    redirect("/usuarios?success=Usuario actualizado.");
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Error inesperado";
+    const message = getActionErrorMessage(error);
     redirect(
       buildUserFormErrorRedirect({
         mode: "edit",
@@ -107,6 +116,8 @@ export async function updateUserAction(formData: FormData) {
       }),
     );
   }
+
+  redirect("/usuarios?success=Usuario actualizado.");
 }
 
 export async function changeSubscriptionStatusAction(formData: FormData) {
@@ -129,11 +140,12 @@ export async function changeSubscriptionStatusAction(formData: FormData) {
     revalidatePath("/suscripciones");
     revalidatePath("/usuarios");
     revalidatePath("/");
-    redirect("/suscripciones?success=Estado actualizado.");
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Error inesperado";
+    const message = getActionErrorMessage(error);
     redirect(`/suscripciones?error=${encodeURIComponent(message)}`);
   }
+
+  redirect("/suscripciones?success=Estado actualizado.");
 }
 
 export async function terminateSubscriptionAction(formData: FormData) {
@@ -149,11 +161,12 @@ export async function terminateSubscriptionAction(formData: FormData) {
     revalidatePath("/suscripciones");
     revalidatePath("/usuarios");
     revalidatePath("/");
-    redirect("/suscripciones?success=Suscripcion terminada.");
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Error inesperado";
+    const message = getActionErrorMessage(error);
     redirect(`/suscripciones?error=${encodeURIComponent(message)}`);
   }
+
+  redirect("/suscripciones?success=Suscripcion terminada.");
 }
 
 export async function updateSettingsAction(formData: FormData) {
@@ -172,11 +185,12 @@ export async function updateSettingsAction(formData: FormData) {
     await patchSettings(parsed.data, actor.adminProfile.id);
     revalidatePath("/configuracion");
     revalidatePath("/");
-    redirect("/configuracion?success=Configuracion actualizada.");
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Error inesperado";
+    const message = getActionErrorMessage(error);
     redirect(`/configuracion?error=${encodeURIComponent(message)}`);
   }
+
+  redirect("/configuracion?success=Configuracion actualizada.");
 }
 
 export async function updatePasswordAction(formData: FormData) {
@@ -194,9 +208,10 @@ export async function updatePasswordAction(formData: FormData) {
 
   try {
     await updateAdminPassword(parsed.data.oldPassword, parsed.data.password);
-    redirect("/configuracion?success=Contraseña actualizada.");
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Error inesperado";
+    const message = getActionErrorMessage(error);
     redirect(`/configuracion?error=${encodeURIComponent(message)}`);
   }
+
+  redirect("/configuracion?success=Contraseña actualizada.");
 }

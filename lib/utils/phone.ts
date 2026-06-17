@@ -1,6 +1,8 @@
-const phoneLib = require("libphonenumber-js");
+import { parsePhoneNumber } from "libphonenumber-js/core";
+import metadata from "libphonenumber-js/metadata.min.json";
+import type { CountryCode } from "libphonenumber-js";
 
-function asCountryCode(value) {
+function asCountryCode(value: unknown): CountryCode | undefined {
   const normalized = String(value ?? "")
     .trim()
     .toUpperCase();
@@ -9,10 +11,10 @@ function asCountryCode(value) {
     return undefined;
   }
 
-  return normalized;
+  return normalized as CountryCode;
 }
 
-function normalizePhoneNumber(value, defaultCountry) {
+export function normalizePhoneNumber(value: unknown, defaultCountry?: unknown) {
   const trimmed = String(value ?? "").trim();
 
   if (!trimmed) {
@@ -24,8 +26,12 @@ function normalizePhoneNumber(value, defaultCountry) {
 
   try {
     const parsed = trimmed.startsWith("+")
-      ? phoneLib.parsePhoneNumber(trimmed)
-      : phoneLib.parsePhoneNumber(trimmed, asCountryCode(defaultCountry));
+      ? parsePhoneNumber(trimmed, {}, metadata)
+      : parsePhoneNumber(
+          trimmed,
+          { defaultCountry: asCountryCode(defaultCountry) },
+          metadata,
+        );
 
     if (!parsed || !parsed.isValid()) {
       return {
@@ -45,7 +51,3 @@ function normalizePhoneNumber(value, defaultCountry) {
     };
   }
 }
-
-module.exports = {
-  normalizePhoneNumber,
-};

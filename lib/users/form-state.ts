@@ -24,7 +24,7 @@ export const DEFAULT_CREATE_USER_FORM_VALUES: UserFormValues = {
   whatsapp: "",
   whatsapp_country: "AR",
   plan: "manual",
-  amount_cents: "19800",
+  amount_cents: "198",
   status: "activa",
   start_date: "",
   next_billing_date: "",

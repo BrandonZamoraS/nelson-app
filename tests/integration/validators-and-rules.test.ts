@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createUserInputSchema } from "@/lib/validators/users";
+import {
+  createUserFormInputSchema,
+  createUserInputSchema,
+} from "@/lib/validators/users";
 import { updateSettingsInputSchema } from "@/lib/validators/settings";
 import { patchSubscriptionStatusInputSchema } from "@/lib/validators/subscriptions";
 import { auditFilterInputSchema } from "@/lib/validators/audit";
@@ -9,7 +12,7 @@ import { auditFilterInputSchema } from "@/lib/validators/audit";
 test("createUserInputSchema accepts valid payload", () => {
   const parsed = createUserInputSchema.safeParse({
     full_name: "Maria Lopez",
-    whatsapp: "+5493514558821",
+    whatsapp: "+14155552671",
     plan: "Mensual",
     amount_cents: 250000,
     status: "activa",
@@ -19,6 +22,42 @@ test("createUserInputSchema accepts valid payload", () => {
   });
 
   assert.equal(parsed.success, true);
+});
+
+test("createUserFormInputSchema converts dollar amount strings to cents", () => {
+  const parsed = createUserFormInputSchema.safeParse({
+    full_name: "Maria Lopez",
+    whatsapp: "+14155552671",
+    plan: "Mensual",
+    amount_cents: "198,50",
+    status: "activa",
+    start_date: "2026-02-13",
+    next_billing_date: null,
+    source: "manual",
+  });
+
+  assert.equal(parsed.success, true);
+  if (parsed.success) {
+    assert.equal(parsed.data.amount_cents, 19850);
+  }
+});
+
+test("createUserInputSchema keeps numeric amount_cents as API cents", () => {
+  const parsed = createUserInputSchema.safeParse({
+    full_name: "Maria Lopez",
+    whatsapp: "+14155552671",
+    plan: "Mensual",
+    amount_cents: 19850,
+    status: "activa",
+    start_date: "2026-02-13",
+    next_billing_date: null,
+    source: "manual",
+  });
+
+  assert.equal(parsed.success, true);
+  if (parsed.success) {
+    assert.equal(parsed.data.amount_cents, 19850);
+  }
 });
 
 test("createUserInputSchema rejects invalid whatsapp", () => {
