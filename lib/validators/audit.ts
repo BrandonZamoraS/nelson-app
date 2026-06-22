@@ -4,6 +4,7 @@ export const auditFilterInputSchema = z.object({
   action: z.string().trim().optional(),
   entity_type: z.string().trim().optional(),
   entity_id: z.string().trim().optional(),
+  actor: z.string().trim().optional(),
   result: z.enum(["ok", "error"]).optional(),
   from: z
     .string()

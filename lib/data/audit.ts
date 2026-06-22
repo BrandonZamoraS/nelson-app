@@ -7,11 +7,14 @@ export async function listAuditLogs(input: AuditFilterInput) {
   const client = createSupabaseAdminClient();
   const fromIndex = (input.page - 1) * input.pageSize;
   const toIndex = fromIndex + input.pageSize - 1;
+  const actorJoin = input.actor
+    ? "actor_profile:admin_profiles!inner(full_name,email)"
+    : "actor_profile:admin_profiles(full_name,email)";
 
   let query = client
     .from("audit_logs")
     .select(
-      "id,occurred_at,actor_admin_id,entity_type,entity_id,action,detail,result",
+      `id,occurred_at,actor_admin_id,entity_type,entity_id,action,detail,result,${actorJoin}`,
       { count: "exact" },
     )
     .order("occurred_at", { ascending: false })
@@ -27,6 +30,13 @@ export async function listAuditLogs(input: AuditFilterInput) {
 
   if (input.entity_id) {
     query = query.ilike("entity_id", `%${input.entity_id}%`);
+  }
+
+  if (input.actor) {
+    const escaped = input.actor.replace(/[%_]/g, "");
+    query = query.or(`full_name.ilike.%${escaped}%,email.ilike.%${escaped}%`, {
+      foreignTable: "admin_profiles",
+    });
   }
 
   if (input.result) {

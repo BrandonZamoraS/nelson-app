@@ -332,6 +332,37 @@ button {
   font-size: 0.9rem;
 }
 
+.audit-event-list {
+  display: grid;
+  gap: 8px;
+}
+
+.audit-event {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) 1fr;
+  gap: 12px;
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+}
+
+.audit-event-date {
+  color: var(--muted);
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.audit-event-summary {
+  color: var(--text-primary);
+  line-height: 1.45;
+}
+
+.audit-event-summary strong {
+  font-weight: 800;
+}
+
 .toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -834,6 +865,15 @@ textarea {
     justify-content: flex-start;
     padding-top: 8px;
     border-top: 1px solid var(--border);
+  }
+
+  .audit-event {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .audit-event-date {
+    white-space: normal;
   }
 }
 

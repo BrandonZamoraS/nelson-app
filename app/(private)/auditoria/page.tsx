@@ -1,4 +1,5 @@
 import { PrivateShell } from "@/components/layout/private-shell";
+import { formatAuditActionSummary, formatAuditActor } from "@/lib/audit/summary";
 import { listAuditLogs } from "@/lib/data/audit";
 import { formatDateTime } from "@/lib/utils/format";
 import { auditFilterInputSchema } from "@/lib/validators/audit";
@@ -14,120 +15,13 @@ function asString(value: string | string[] | undefined) {
   return value ?? "";
 }
 
-const actionLabels: Record<string, string> = {
-  create: "Creación",
-  update: "Actualización",
-  delete: "Eliminación",
-  suspend: "Suspensión",
-  reactivate: "Reactivación",
-  terminate: "Finalización",
-  sync: "Sincronización",
-  "settings.update": "Actualización de configuración",
-  "subscription.status.change": "Cambio de estado de suscripción",
-  "user.create": "Creación de usuario",
-  "user.update": "Actualización de usuario",
-};
-
-const entityLabels: Record<string, string> = {
-  user: "Usuario",
-  users: "Usuario",
-  subscription: "Suscripción",
-  subscriptions: "Suscripción",
-  payment: "Pago",
-  payments: "Pago",
-  crop: "Cultivo",
-  expense: "Gasto",
-  sale: "Venta",
-  settings: "Configuración",
-};
-
-const detailLabels: Record<string, string> = {
-  full_name: "Nombre",
-  whatsapp: "WhatsApp",
-  plan: "Plan",
-  status: "Estado",
-  amount_cents: "Monto",
-  currency: "Moneda",
-  source: "Origen",
-  previous_status: "Estado anterior",
-  target_status: "Nuevo estado",
-  next_billing_date: "Próximo cobro",
-  grace_days: "Días de gracia",
-  payment_reminder_template: "Recordatorio de pago",
-  suspension_notice_template: "Aviso de suspensión",
-};
-
-function humanize(value: string) {
-  return value
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function formatDetailValue(key: string, value: unknown) {
-  if (value === null || value === undefined || value === "") {
-    return "Sin dato";
-  }
-
-  if (key.endsWith("_cents") && typeof value === "number") {
-    return new Intl.NumberFormat("es-CR", {
-      style: "currency",
-      currency: "USD",
-    }).format(value / 100);
-  }
-
-  if (typeof value === "boolean") {
-    return value ? "Sí" : "No";
-  }
-
-  if (typeof value === "object") {
-    return "Datos actualizados";
-  }
-
-  return String(value);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function formatReference(entityId: string) {
-  const shortId = entityId.length > 12 ? `${entityId.slice(0, 8)}...` : entityId;
-  return `Referencia: ${shortId}`;
-}
-
-function formatAuditDetails(detail: Record<string, unknown>, entityId: string) {
-  const safeDetail = isRecord(detail) ? detail : {};
-  const readableEntries = Object.entries(safeDetail).filter(
-    ([key]) => !key.endsWith("_id") && key !== "actor_auth_id",
-  );
-
-  const hasReadableIdentifier = Object.keys(safeDetail).some(
-    (key) => key === "full_name" || key === "whatsapp" || key.endsWith("_name"),
-  );
-
-  const reference = hasReadableIdentifier ? null : formatReference(entityId);
-
-  if (readableEntries.length === 0) {
-    return reference ?? "Cambio registrado";
-  }
-
-  const details = readableEntries
-    .slice(0, 3)
-    .map(([key, value]) => {
-      const label = detailLabels[key] ?? humanize(key);
-      return `${label}: ${formatDetailValue(key, value)}`;
-    })
-    .join(" · ");
-
-  return reference ? `${details} · ${reference}` : details;
-}
-
 export default async function AuditPage({ searchParams }: AuditPageProps) {
   const params = await searchParams;
   const parsed = auditFilterInputSchema.safeParse({
     action: asString(params.action) || undefined,
     entity_type: asString(params.entity_type) || undefined,
     entity_id: asString(params.entity_id) || undefined,
+    actor: asString(params.actor) || undefined,
     result: asString(params.result) || undefined,
     from: asString(params.from) || undefined,
     to: asString(params.to) || undefined,
@@ -140,11 +34,24 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
   const totalPages = Math.max(1, Math.ceil(result.total / result.pageSize));
   const prevPage = Math.max(1, result.page - 1);
   const nextPage = Math.min(totalPages, result.page + 1);
+  const paginationParams = new URLSearchParams();
+
+  if (filters.actor) paginationParams.set("actor", filters.actor);
+  if (filters.result) paginationParams.set("result", filters.result);
+  if (filters.from) paginationParams.set("from", filters.from);
+  if (filters.to) paginationParams.set("to", filters.to);
+  paginationParams.set("pageSize", String(result.pageSize));
+
+  const pageHref = (page: number) => {
+    const params = new URLSearchParams(paginationParams);
+    params.set("page", String(page));
+    return `/auditoria?${params.toString()}`;
+  };
 
   return (
     <PrivateShell
       title="Auditoria"
-      subtitle="Trazabilidad completa de mutaciones del sistema"
+      subtitle="Historial simple de quién hizo qué, sin detalles sensibles"
     >
       <section className="panel-block">
         <form className="toolbar-grid" method="get">
@@ -155,6 +62,15 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
               <option value="ok">ok</option>
               <option value="error">error</option>
             </select>
+          </div>
+          <div className="form-field">
+            <label htmlFor="actor">Usuario</label>
+            <input
+              id="actor"
+              name="actor"
+              placeholder="Nombre o email"
+              defaultValue={filters.actor ?? ""}
+            />
           </div>
           <div className="form-field">
             <label htmlFor="from">Desde</label>
@@ -172,35 +88,27 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
           </div>
         </form>
 
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Fecha</th>
-                <th>Acción</th>
-                <th>Entidad</th>
-                <th>Datos</th>
-                <th>Resultado</th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.rows.map((row) => (
-                <tr key={row.id}>
-                  <td data-label="Fecha">{formatDateTime(row.occurred_at)}</td>
-                  <td data-label="Acción">{actionLabels[row.action] ?? humanize(row.action)}</td>
-                  <td data-label="Entidad">
-                    {entityLabels[row.entity_type] ?? humanize(row.entity_type)}
-                  </td>
-                  <td data-label="Datos">{formatAuditDetails(row.detail, row.entity_id)}</td>
-                  <td data-label="Resultado">
-                    <span className={row.result === "ok" ? "badge badge-active" : "badge badge-critical"}>
-                      {row.result === "ok" ? "Correcto" : "Error"}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="audit-event-list" aria-label="Eventos de auditoría">
+          {result.rows.map((row) => {
+            const actorName = row.actor_profile?.full_name ?? row.actor_profile?.email;
+            const actor = formatAuditActor({ ...row.detail, actor_name: actorName });
+            const action = formatAuditActionSummary({
+              action: row.action,
+              entityType: row.entity_type,
+              result: row.result,
+            });
+
+            return (
+              <article className="audit-event" key={row.id}>
+                <time className="audit-event-date" dateTime={row.occurred_at}>
+                  {formatDateTime(row.occurred_at)}
+                </time>
+                <p className="audit-event-summary">
+                  <strong>{actor}</strong> {action}.
+                </p>
+              </article>
+            );
+          })}
         </div>
 
         <div className="row-between">
@@ -209,13 +117,13 @@ export default async function AuditPage({ searchParams }: AuditPageProps) {
           </p>
           <div className="row-inline">
             <a
-              href={`/auditoria?page=${prevPage}&pageSize=${result.pageSize}`}
+              href={pageHref(prevPage)}
               className="button button-ghost"
             >
               Anterior
             </a>
             <a
-              href={`/auditoria?page=${nextPage}&pageSize=${result.pageSize}`}
+              href={pageHref(nextPage)}
               className="button button-ghost"
             >
               Siguiente

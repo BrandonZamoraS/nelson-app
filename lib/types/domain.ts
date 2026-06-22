@@ -43,6 +43,10 @@ export type AuditLogRecord = {
   action: string;
   detail: Record<string, unknown>;
   result: "ok" | "error";
+  actor_profile?: {
+    full_name: string | null;
+    email: string;
+  } | null;
 };
 
 export type PaymentStatus = "pending" | "paid" | "failed" | "refunded";

@@ -113,3 +113,8 @@ test("auditFilterInputSchema defaults pagination", () => {
   assert.equal(parsed.page, 1);
   assert.equal(parsed.pageSize, 20);
 });
+
+test("auditFilterInputSchema accepts trimmed actor search", () => {
+  const parsed = auditFilterInputSchema.parse({ actor: "  Maria Lopez  " });
+  assert.equal(parsed.actor, "Maria Lopez");
+});
