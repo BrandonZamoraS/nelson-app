@@ -64,6 +64,83 @@ type ApplySubscriptionStatusChange = (
 
 const USER_COLUMNS = "id,full_name,whatsapp,is_active,deactivated_at,created_at,updated_at";
 
+const ACCESS_RESTORING_SUBSCRIPTION_STATUSES = new Set<SubscriptionStatus>(["activa", "gracia"]);
+
+function isAllowedManualStatusTransition(
+  currentStatus: SubscriptionStatus,
+  targetStatus: SubscriptionStatus,
+) {
+  return (
+    (currentStatus === "activa" && ["gracia", "suspendida", "terminada"].includes(targetStatus)) ||
+    (currentStatus === "gracia" && ["activa", "suspendida", "terminada"].includes(targetStatus)) ||
+    (currentStatus === "suspendida" && ["activa", "terminada"].includes(targetStatus))
+  );
+}
+
+function assertSubscriptionStatusChangeAllowed(
+  currentStatus: SubscriptionStatus,
+  targetStatus: SubscriptionStatus,
+  userIsActive: boolean,
+) {
+  if (!userIsActive && ACCESS_RESTORING_SUBSCRIPTION_STATUSES.has(targetStatus)) {
+    throw new AppError(
+      "No se puede restaurar acceso desde la edición ordinaria mientras el usuario esté inactivo",
+      409,
+      "inactive_user_status_change_forbidden",
+    );
+  }
+
+  if (!isAllowedManualStatusTransition(currentStatus, targetStatus)) {
+    throw new AppError(
+      "La suscripción no pudo actualizarse (invalid_transition)",
+      409,
+      "invalid_transition",
+    );
+  }
+}
+
+async function defaultApplySubscriptionStatusChange(payload: ApplySubscriptionStatusChangeInput) {
+  const { applySubscriptionEvent } = await import("@/lib/data/subscription-events");
+
+  return applySubscriptionEvent(payload);
+}
+
+function hasStatusChange(
+  currentStatus: string | null | undefined,
+  targetStatus: SubscriptionStatus,
+): currentStatus is SubscriptionStatus {
+  return typeof currentStatus === "string" && currentStatus !== targetStatus;
+}
+
+async function applyManualStatusChange(
+  applySubscriptionStatusChange: ApplySubscriptionStatusChange,
+  subscriptionId: string,
+  targetStatus: SubscriptionStatus,
+  actorAdminId?: string | null,
+) {
+  const eventResult = await applySubscriptionStatusChange({
+    idempotency_key: `manual-status:${subscriptionId}:${targetStatus}:${Date.now()}`,
+    event_type: "manual_status_change",
+    source: "manual",
+    subscription_id: subscriptionId,
+    target_status: targetStatus,
+    occurred_at: new Date().toISOString(),
+    metadata: {
+      actor_admin_id: actorAdminId ?? null,
+    },
+  });
+
+  if (eventResult.event?.status !== "processed" && eventResult.event?.status !== "ignored") {
+    throw new AppError(
+      `La suscripción no pudo actualizarse (${String(eventResult.event?.error_code ?? eventResult.event?.status ?? "unknown")})`,
+      409,
+      String(eventResult.event?.error_code ?? "subscription_status_change_failed"),
+    );
+  }
+
+  return eventResult;
+}
+
 function isDuplicateWhatsappError(error: QueryError) {
   return error.code === "23505" && (error.message ?? "").toLowerCase().includes("whatsapp");
 }
@@ -156,7 +233,6 @@ async function updateSubscription(
     .update({
       plan: input.plan,
       amount_cents: input.amount_cents,
-      status: input.status,
       start_date: input.start_date,
       next_billing_date: input.next_billing_date ?? null,
       source: input.source,
@@ -172,20 +248,6 @@ async function updateSubscription(
   }
 
   return data as SubscriptionRecord;
-}
-
-async function upsertSubscriptionForUser(
-  client: SupabaseLikeClient,
-  userId: string,
-  input: CreateUserInput,
-) {
-  const existingSubscription = await findSubscriptionByUserId(client, userId);
-
-  if (existingSubscription) {
-    return updateSubscription(client, existingSubscription.id, input);
-  }
-
-  return createSubscription(client, userId, input);
 }
 
 async function restoreInactiveUser(client: SupabaseLikeClient, user: UserRecord) {
@@ -206,6 +268,7 @@ export async function createUserWithSubscriptionUsingClient(
   input: CreateUserInput,
   logAudit: AuditLogger,
   actorAdminId?: string | null,
+  applySubscriptionStatusChange: ApplySubscriptionStatusChange = defaultApplySubscriptionStatusChange,
 ) {
   let insertedFreshUser = false;
   let reactivatedUserSnapshot: UserRecord | null = null;
@@ -247,7 +310,30 @@ export async function createUserWithSubscriptionUsingClient(
   }
 
   try {
-    const subscription = await upsertSubscriptionForUser(client, user.id, input);
+    const existingSubscription = await findSubscriptionByUserId(client, user.id);
+
+    if (existingSubscription && hasStatusChange(existingSubscription.status, input.status)) {
+      assertSubscriptionStatusChangeAllowed(existingSubscription.status, input.status, user.is_active !== false);
+    }
+
+    const subscription = existingSubscription
+      ? await updateSubscription(client, existingSubscription.id, input)
+      : await createSubscription(client, user.id, input);
+
+    const statusEventResult =
+      existingSubscription && hasStatusChange(existingSubscription.status, input.status)
+        ? await applyManualStatusChange(
+            applySubscriptionStatusChange,
+            existingSubscription.id,
+            input.status,
+            actorAdminId,
+          )
+        : null;
+
+    const finalSubscription =
+      (statusEventResult as ApplySubscriptionStatusChangeResult & { subscription?: SubscriptionRecord | null } | null)
+        ?.subscription ??
+      (statusEventResult ? { ...subscription, status: input.status } : subscription);
 
     await logAudit({
       actorAuthId: actorAdminId,
@@ -258,14 +344,14 @@ export async function createUserWithSubscriptionUsingClient(
       detail: {
         full_name: user.full_name,
         whatsapp: user.whatsapp,
-        subscription_id: subscription.id,
-        amount_cents: subscription.amount_cents,
+        subscription_id: finalSubscription.id,
+        amount_cents: finalSubscription.amount_cents,
         reactivated: insertedFreshUser ? false : true,
       },
       result: "ok",
     });
 
-    return { user, subscription };
+    return { user, subscription: finalSubscription };
   } catch (error) {
     if (insertedFreshUser) {
       await asTableBuilder(client.from("users")).delete().eq("id", user.id);
@@ -283,13 +369,9 @@ export async function updateUserAndSubscriptionUsingClient(
   logAudit: AuditLogger,
   readUserById: ReadUserById,
   actorAdminId?: string | null,
-  applySubscriptionStatusChange: ApplySubscriptionStatusChange = async (payload) => {
-    const { applySubscriptionEvent } = await import("@/lib/data/subscription-events");
-
-    return applySubscriptionEvent(payload);
-  },
+  applySubscriptionStatusChange: ApplySubscriptionStatusChange = defaultApplySubscriptionStatusChange,
 ) {
-  const { error: userError } = await asTableBuilder(client.from("users"))
+  const { data: updatedUser, error: userError } = await asTableBuilder(client.from("users"))
     .update({
       full_name: input.full_name,
       whatsapp: input.whatsapp,
@@ -335,6 +417,16 @@ export async function updateUserAndSubscriptionUsingClient(
     throw new AppError("Suscripción no encontrada", 404, "subscription_not_found");
   }
 
+  const subscriptionRecord = subscription as { id: string; status?: string };
+
+  if (hasStatusChange(subscriptionRecord.status, input.status)) {
+    assertSubscriptionStatusChangeAllowed(
+      subscriptionRecord.status,
+      input.status,
+      (updatedUser as UserRecord | null)?.is_active !== false,
+    );
+  }
+
   const { error: subscriptionUpdateError } = await asTableBuilder(
     client.from("subscriptions"),
   )
@@ -357,28 +449,13 @@ export async function updateUserAndSubscriptionUsingClient(
     );
   }
 
-  const subscriptionRecord = subscription as { id: string; status?: string };
-
-  if (typeof subscriptionRecord.status === "string" && subscriptionRecord.status !== input.status) {
-    const eventResult = await applySubscriptionStatusChange({
-      idempotency_key: `manual-status:${subscriptionRecord.id}:${input.status}:${Date.now()}`,
-      event_type: "manual_status_change",
-      source: "manual",
-      subscription_id: subscriptionRecord.id,
-      target_status: input.status,
-      occurred_at: new Date().toISOString(),
-      metadata: {
-        actor_admin_id: actorAdminId ?? null,
-      },
-    });
-
-    if (eventResult.event?.status !== "processed" && eventResult.event?.status !== "ignored") {
-      throw new AppError(
-        `La suscripción no pudo actualizarse (${String(eventResult.event?.error_code ?? eventResult.event?.status ?? "unknown")})`,
-        409,
-        String(eventResult.event?.error_code ?? "subscription_status_change_failed"),
-      );
-    }
+  if (hasStatusChange(subscriptionRecord.status, input.status)) {
+    await applyManualStatusChange(
+      applySubscriptionStatusChange,
+      subscriptionRecord.id,
+      input.status,
+      actorAdminId,
+    );
   }
 
   await logAudit({

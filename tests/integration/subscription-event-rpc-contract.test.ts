@@ -113,6 +113,16 @@ test("apply_subscription_event RPC returns rejected events from the exception ha
   assert.doesNotMatch(sql, /exception[\s\S]*when others then[\s\S]*raise;/i);
 });
 
+test("apply_subscription_event RPC does not persist stale rolled-back FK ids in rejected recovery rows", () => {
+  const sql = readMigration();
+
+  assert.match(sql, /when others then[\s\S]*select 1 from public\.subscriptions where id = v_subscription\.id/i);
+  assert.match(sql, /when others then[\s\S]*select 1 from public\.users where id = v_user\.id/i);
+  assert.match(sql, /when others then[\s\S]*values \([\s\S]*case when v_persisted_subscription_exists then v_subscription\.id else null end[\s\S]*case when v_persisted_user_exists then v_user\.id else null end/i);
+  assert.match(sql, /'generated_subscription_id',[\s\S]*case when not v_persisted_subscription_exists then v_subscription\.id else null end/i);
+  assert.match(sql, /'generated_user_id',[\s\S]*case when not v_persisted_user_exists then v_user\.id else null end/i);
+});
+
 test("apply_subscription_event RPC stores unresolved subscription and user identifiers in metadata before FK resolution", () => {
   const sql = readMigration();
 

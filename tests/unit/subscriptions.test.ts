@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import test from "node:test";
 
 import { AppError } from "@/lib/errors/app-error";
@@ -121,4 +123,16 @@ test("ensureManualSubscriptionEventProcessed treats ignored terminal cancels as 
   );
 
   assert.deepEqual(result, { ...subscription, status: "terminada", next_billing_date: null });
+});
+
+test("terminateSubscription allows ignored terminal cancels as an idempotent success", () => {
+  const source = fs.readFileSync(
+    path.join(process.cwd(), "lib", "data", "subscriptions.ts"),
+    "utf8",
+  );
+
+  assert.match(
+    source,
+    /ensureManualSubscriptionEventProcessed\(result,\s*\{\s*allowIgnoredTerminalCancel:\s*true,?\s*\}\)/,
+  );
 });

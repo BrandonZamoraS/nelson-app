@@ -171,7 +171,9 @@ export async function terminateSubscription(
   }
 
   try {
-    const subscription = ensureManualSubscriptionEventProcessed(result);
+    const subscription = ensureManualSubscriptionEventProcessed(result, {
+      allowIgnoredTerminalCancel: true,
+    });
 
     await logAudit(
       toManualSubscriptionAuditEntry({

@@ -148,6 +148,8 @@ declare
   v_error_code text := null;
   v_duplicate boolean := false;
   v_reactivated_user boolean := false;
+  v_persisted_subscription_exists boolean := false;
+  v_persisted_user_exists boolean := false;
 begin
   insert into public.subscription_events (
     idempotency_key,
@@ -514,6 +516,18 @@ begin
     );
   exception
     when others then
+      if v_subscription.id is not null then
+        select exists(
+          select 1 from public.subscriptions where id = v_subscription.id
+        ) into v_persisted_subscription_exists;
+      end if;
+
+      if v_user.id is not null then
+        select exists(
+          select 1 from public.users where id = v_user.id
+        ) into v_persisted_user_exists;
+      end if;
+
       insert into public.subscription_events as subscription_events (
         id,
         idempotency_key,
@@ -535,8 +549,8 @@ begin
         event_payload->>'idempotency_key',
         v_event_type,
         v_source,
-        v_subscription.id,
-        v_user.id,
+        case when v_persisted_subscription_exists then v_subscription.id else null end,
+        case when v_persisted_user_exists then v_user.id else null end,
         v_amount_cents,
         v_currency,
         v_occurred_at,
@@ -547,6 +561,8 @@ begin
           'duplicate', v_duplicate,
           'target_status', v_target_status,
           'reactivated_user', case when v_reactivated_user then true else null end,
+          'generated_subscription_id', case when not v_persisted_subscription_exists then v_subscription.id else null end,
+          'generated_user_id', case when not v_persisted_user_exists then v_user.id else null end,
           'statement_error', sqlstate
         )),
         now()

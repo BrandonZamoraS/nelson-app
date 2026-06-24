@@ -173,6 +173,7 @@ test("createUserWithSubscriptionUsingClient reactivates an inactive WhatsApp ide
 
 test("createUserWithSubscriptionUsingClient reuses an existing subscription for a reactivated user", async () => {
   const operations: FakeOperation[] = [];
+  const appliedEvents: Array<Record<string, unknown>> = [];
   const inactiveUser = {
     id: "user-inactive",
     full_name: "Maria Antigua",
@@ -188,9 +189,9 @@ test("createUserWithSubscriptionUsingClient reuses an existing subscription for 
     plan: "Plan anterior",
     amount_cents: 1500,
     currency: "USD",
-    status: "terminada",
+    status: "gracia",
     start_date: "2026-05-01",
-    next_billing_date: null,
+    next_billing_date: "2026-06-20",
     source: "manual",
     created_at: "2026-05-01T00:00:00.000Z",
     updated_at: "2026-06-01T00:00:00.000Z",
@@ -240,7 +241,6 @@ test("createUserWithSubscriptionUsingClient reuses an existing subscription for 
           ...existingSubscription,
           plan: createInput.plan,
           amount_cents: createInput.amount_cents,
-          status: createInput.status,
           start_date: createInput.start_date,
           next_billing_date: createInput.next_billing_date,
           source: createInput.source,
@@ -252,15 +252,51 @@ test("createUserWithSubscriptionUsingClient reuses an existing subscription for 
     throw new Error(`Unhandled operation: ${JSON.stringify(operation)}`);
   });
 
-  const result = await createUserWithSubscriptionUsingClient(client, createInput, async () => {}, "admin-1");
+  const result = await (createUserWithSubscriptionUsingClient as unknown as (...args: unknown[]) => Promise<{
+    user: { id: string };
+    subscription: { id: string; status: string };
+  }>)(
+    client,
+    createInput,
+    async () => {},
+    "admin-1",
+    async (payload: unknown) => {
+      appliedEvents.push(payload as Record<string, unknown>);
+      return {
+        duplicate: false,
+        event: { id: "evt-1", status: "processed", error_code: null },
+        subscription: { ...existingSubscription, status: createInput.status },
+        payment: null,
+        user: null,
+      };
+    },
+  );
 
   assert.equal(result.subscription.id, existingSubscription.id);
+  assert.equal(result.subscription.status, createInput.status);
   assert.equal(
     operations.some(
       (operation) => operation.table === "subscriptions" && operation.action === "insert",
     ),
     false,
   );
+  const updateOperation = operations.find(
+    (operation) =>
+      operation.table === "subscriptions" &&
+      operation.action === "update" &&
+      operation.filters.id === existingSubscription.id,
+  );
+  assert.deepEqual(updateOperation?.payload, {
+    plan: createInput.plan,
+    amount_cents: createInput.amount_cents,
+    start_date: createInput.start_date,
+    next_billing_date: createInput.next_billing_date,
+    source: createInput.source,
+  });
+  assert.equal(appliedEvents.length, 1);
+  assert.equal(appliedEvents[0]?.event_type, "manual_status_change");
+  assert.equal(appliedEvents[0]?.subscription_id, existingSubscription.id);
+  assert.equal(appliedEvents[0]?.target_status, createInput.status);
 });
 
 test("createUserWithSubscriptionUsingClient rolls back a reactivated user when subscription persistence fails", async () => {
@@ -596,4 +632,142 @@ test("updateUserAndSubscriptionUsingClient routes status changes through the can
   assert.equal(appliedEvents[0]?.event_type, "manual_status_change");
   assert.equal(appliedEvents[0]?.subscription_id, "sub-1");
   assert.equal(appliedEvents[0]?.target_status, createInput.status);
+});
+
+test("updateUserAndSubscriptionUsingClient preflights invalid status changes before direct subscription edits", async () => {
+  const operations: FakeOperation[] = [];
+  const appliedEvents: Array<Record<string, unknown>> = [];
+
+  const client = createFakeClient((operation) => {
+    operations.push(operation);
+
+    if (
+      operation.table === "users" &&
+      operation.action === "update" &&
+      operation.filters.id === "user-1"
+    ) {
+      return {
+        data: {
+          id: "user-1",
+          is_active: true,
+          deactivated_at: null,
+        },
+        error: null,
+      };
+    }
+
+    if (
+      operation.table === "subscriptions" &&
+      operation.action === "select" &&
+      operation.filters.user_id === "user-1"
+    ) {
+      return {
+        data: {
+          id: "sub-1",
+          status: "terminada",
+        },
+        error: null,
+      };
+    }
+
+    throw new Error(`Unhandled operation: ${JSON.stringify(operation)}`);
+  });
+
+  await assert.rejects(
+    () =>
+      updateUserAndSubscriptionUsingClient(
+        client,
+        "user-1",
+        createInput,
+        async () => {},
+        async () => ({ user: { id: "user-1" } as never, subscription: null }),
+        "admin-1",
+        async (payload) => {
+          appliedEvents.push(payload as Record<string, unknown>);
+          return { event: { status: "processed", error_code: null } };
+        },
+      ),
+    (error: unknown) => {
+      assert.ok(error instanceof AppError);
+      assert.equal(error.code, "invalid_transition");
+      return true;
+    },
+  );
+
+  assert.equal(
+    operations.some(
+      (operation) => operation.table === "subscriptions" && operation.action === "update",
+    ),
+    false,
+  );
+  assert.equal(appliedEvents.length, 0);
+});
+
+test("updateUserAndSubscriptionUsingClient blocks access-restoring status changes for inactive users", async () => {
+  const operations: FakeOperation[] = [];
+  const appliedEvents: Array<Record<string, unknown>> = [];
+
+  const client = createFakeClient((operation) => {
+    operations.push(operation);
+
+    if (
+      operation.table === "users" &&
+      operation.action === "update" &&
+      operation.filters.id === "user-1"
+    ) {
+      return {
+        data: {
+          id: "user-1",
+          is_active: false,
+          deactivated_at: "2026-06-01T00:00:00.000Z",
+        },
+        error: null,
+      };
+    }
+
+    if (
+      operation.table === "subscriptions" &&
+      operation.action === "select" &&
+      operation.filters.user_id === "user-1"
+    ) {
+      return {
+        data: {
+          id: "sub-1",
+          status: "suspendida",
+        },
+        error: null,
+      };
+    }
+
+    throw new Error(`Unhandled operation: ${JSON.stringify(operation)}`);
+  });
+
+  await assert.rejects(
+    () =>
+      updateUserAndSubscriptionUsingClient(
+        client,
+        "user-1",
+        { ...createInput, status: "activa" },
+        async () => {},
+        async () => ({ user: { id: "user-1" } as never, subscription: null }),
+        "admin-1",
+        async (payload) => {
+          appliedEvents.push(payload as Record<string, unknown>);
+          return { event: { status: "processed", error_code: null } };
+        },
+      ),
+    (error: unknown) => {
+      assert.ok(error instanceof AppError);
+      assert.equal(error.code, "inactive_user_status_change_forbidden");
+      return true;
+    },
+  );
+
+  assert.equal(
+    operations.some(
+      (operation) => operation.table === "subscriptions" && operation.action === "update",
+    ),
+    false,
+  );
+  assert.equal(appliedEvents.length, 0);
 });
