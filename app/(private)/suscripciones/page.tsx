@@ -32,7 +32,7 @@ export default async function SubscriptionsPage({
     limit: 100,
   });
   const filters = parsed.success ? parsed.data : {};
-  const [rows, pendingReviewItems] = await Promise.all([
+  const [rows, pendingReview] = await Promise.all([
     listSubscriptions(filters),
     listPendingReviewSubscriptionEvents(),
   ]);
@@ -52,7 +52,10 @@ export default async function SubscriptionsPage({
       {success ? <FlashMessage kind="success" message={success} /> : null}
       {error ? <FlashMessage kind="error" message={error} /> : null}
 
-      <PendingReviewSubscriptionsPanel items={pendingReviewItems} />
+      <PendingReviewSubscriptionsPanel
+        items={pendingReview.items}
+        totalCount={pendingReview.totalCount}
+      />
 
       <section className="panel-block">
         <form className="toolbar" method="get">

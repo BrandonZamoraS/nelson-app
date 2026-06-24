@@ -131,12 +131,19 @@ declare
   v_full_name text := nullif(event_payload->>'full_name', '');
   v_plan text := coalesce(nullif(event_payload->>'plan', ''), 'initial_month');
   v_target_status text := nullif(event_payload->>'target_status', '');
-  v_metadata jsonb := coalesce(event_payload->'metadata', '{}'::jsonb);
+  v_metadata jsonb := jsonb_strip_nulls(
+    coalesce(event_payload->'metadata', '{}'::jsonb) ||
+    jsonb_build_object(
+      'whatsapp', v_whatsapp,
+      'full_name', v_full_name
+    )
+  );
   v_expected_amount integer;
   v_next_billing_date date;
   v_event_status text := 'processed';
   v_error_code text := null;
   v_duplicate boolean := false;
+  v_reactivated_user boolean := false;
 begin
   insert into public.subscription_events (
     idempotency_key,
@@ -230,12 +237,33 @@ begin
     for update;
   end if;
 
+  if v_subscription.id is not null and v_subscription.user_id is not null then
+    if v_user_id is not null and v_user_id <> v_subscription.user_id then
+      v_event_status := 'rejected';
+      v_error_code := 'subscription_user_conflict';
+    elsif v_user.id is not null and v_user.id <> v_subscription.user_id then
+      v_event_status := 'rejected';
+      v_error_code := case
+        when v_whatsapp is not null then 'subscription_whatsapp_conflict'
+        else 'subscription_user_conflict'
+      end;
+    elsif v_user.id is null then
+      select *
+      into v_user
+      from public.users u
+      where u.id = v_subscription.user_id
+      limit 1;
+    end if;
+  end if;
+
   select *
   into v_settings
   from public.app_settings
   where id = 1;
 
-  if v_event_type = 'payment_succeeded' then
+  if v_event_status <> 'processed' then
+    null;
+  elsif v_event_type = 'payment_succeeded' then
     v_expected_amount := coalesce(v_subscription.amount_cents, v_settings.initial_subscription_amount_cents);
 
     if v_amount_cents is null or v_paid_at is null then
@@ -293,16 +321,27 @@ begin
           returning * into v_subscription;
         end if;
       else
-        if v_subscription.next_billing_date is null then
+        if v_user.id is not null and v_user.is_active = false then
+          update public.users
+          set is_active = true,
+              deactivated_at = null,
+              full_name = coalesce(v_full_name, full_name)
+          where id = v_user.id
+          returning * into v_user;
+
+          v_reactivated_user := true;
+        end if;
+
+        if v_subscription.status in ('gracia', 'suspendida', 'terminada') then
+          v_next_billing_date := (v_paid_at::date + interval '1 month')::date;
+        elsif v_subscription.next_billing_date is null then
           v_event_status := 'pending_review';
           v_error_code := 'missing_subscription_cycle';
         else
-          if v_subscription.status in ('gracia', 'suspendida', 'terminada') then
-            v_next_billing_date := (v_paid_at::date + interval '1 month')::date;
-          else
-            v_next_billing_date := (v_subscription.next_billing_date + interval '1 month')::date;
-          end if;
+          v_next_billing_date := (v_subscription.next_billing_date + interval '1 month')::date;
+        end if;
 
+        if v_event_status = 'processed' then
           update public.subscriptions
           set status = 'activa',
               next_billing_date = v_next_billing_date,
@@ -449,7 +488,7 @@ begin
       metadata = subscription_events.metadata || jsonb_strip_nulls(jsonb_build_object(
         'duplicate', v_duplicate,
         'target_status', v_target_status,
-        'reactivated_user', case when v_user.id is not null and v_user.is_active = true and v_user.deactivated_at is null then true else null end
+        'reactivated_user', case when v_reactivated_user then true else null end
       ))
   where id = v_event_id
   returning * into v_event;
@@ -465,20 +504,39 @@ exception
   when others then
     if v_event_id is not null then
       update public.subscription_events
-      set status = 'rejected',
-          error_code = sqlstate,
-          processed_at = now()
+      set subscription_id = coalesce(v_subscription.id, subscription_id),
+          user_id = coalesce(v_user.id, user_id),
+          status = 'rejected',
+          error_code = coalesce(v_error_code, sqlstate),
+          processed_at = now(),
+          metadata = subscription_events.metadata || jsonb_strip_nulls(jsonb_build_object(
+            'duplicate', v_duplicate,
+            'target_status', v_target_status,
+            'reactivated_user', case when v_reactivated_user then true else null end,
+            'statement_error', sqlstate
+          ))
       where id = v_event_id;
+
+      select * into v_event from public.subscription_events where id = v_event_id;
     end if;
 
-    raise;
+    return jsonb_build_object(
+      'duplicate', v_duplicate,
+      'event', to_jsonb(v_event),
+      'subscription', to_jsonb(v_subscription),
+      'payment', to_jsonb(v_payment),
+      'user', to_jsonb(v_user)
+    );
 end;
 $$;
 
 alter table public.subscription_events enable row level security;
 
 grant select, insert, update on table public.subscription_events to authenticated;
-grant execute on function public.apply_subscription_event(jsonb) to authenticated;
+revoke all on function public.apply_subscription_event(jsonb) from public;
+revoke all on function public.apply_subscription_event(jsonb) from anon;
+revoke all on function public.apply_subscription_event(jsonb) from authenticated;
+grant execute on function public.apply_subscription_event(jsonb) to service_role;
 
 do $$
 begin

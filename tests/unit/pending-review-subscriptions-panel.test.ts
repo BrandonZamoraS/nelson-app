@@ -11,7 +11,7 @@ import {
 
 function render(items: PendingReviewSubscriptionItem[]) {
   return renderToStaticMarkup(
-    React.createElement(PendingReviewSubscriptionsPanel, { items }),
+    React.createElement(PendingReviewSubscriptionsPanel, { items, totalCount: items.length }),
   );
 }
 
@@ -73,4 +73,32 @@ test("PendingReviewSubscriptionsPanel falls back to manual review context when i
   assert.match(html, /Usuario por confirmar/);
   assert.match(html, /Sin suscripción vinculada/);
   assert.match(html, /Faltan datos para identificar al usuario/);
+});
+
+test("PendingReviewSubscriptionsPanel shows the exact open count even when only the latest items are rendered", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(PendingReviewSubscriptionsPanel, {
+      items: [
+        {
+          id: "evt-1",
+          eventType: "payment_succeeded",
+          source: "n8n",
+          occurredAt: "2026-06-23T12:00:00.000Z",
+          amountCents: 1500,
+          currency: "USD",
+          reasonCode: "amount_mismatch",
+          reasonLabel: "Monto distinto al esperado",
+          subscriptionId: "sub-1",
+          subscriptionPlan: "Plan mensual",
+          expectedAmountCents: 2000,
+          userId: "user-1",
+          userName: "Ana Pérez",
+          userWhatsapp: "+5493511234567",
+        },
+      ],
+      totalCount: 13,
+    }),
+  );
+
+  assert.match(html, /13 abiertos/);
 });

@@ -12,6 +12,11 @@ export type ApplySubscriptionEventResult = {
   user: Record<string, unknown> | null;
 };
 
+export type PendingReviewSubscriptionList = {
+  items: PendingReviewSubscriptionItem[];
+  totalCount: number;
+};
+
 export async function applySubscriptionEvent(input: unknown) {
   const parsed = subscriptionEventInputSchema.safeParse(input);
   if (!parsed.success) {
@@ -55,6 +60,10 @@ type PendingReviewEventRow = {
   error_code: string | null;
   subscription_id: string | null;
   user_id: string | null;
+  metadata: {
+    whatsapp?: string;
+    full_name?: string;
+  } | null;
 };
 
 type PendingReviewSubscriptionRow = {
@@ -72,12 +81,13 @@ type PendingReviewUserRow = {
 
 export async function listPendingReviewSubscriptionEvents(
   limit = 8,
-): Promise<PendingReviewSubscriptionItem[]> {
+): Promise<PendingReviewSubscriptionList> {
   const client = createSupabaseAdminClient();
-  const { data: eventRows, error: eventsError } = await client
+  const { data: eventRows, error: eventsError, count } = await client
     .from("subscription_events")
     .select(
-      "id,event_type,source,occurred_at,amount_cents,currency,error_code,subscription_id,user_id",
+      "id,event_type,source,occurred_at,amount_cents,currency,error_code,subscription_id,user_id,metadata",
+      { count: "exact" },
     )
     .eq("status", "pending_review")
     .order("occurred_at", { ascending: false })
@@ -88,8 +98,12 @@ export async function listPendingReviewSubscriptionEvents(
   }
 
   const events = (eventRows ?? []) as PendingReviewEventRow[];
+  const totalCount = count ?? 0;
   if (events.length === 0) {
-    return [];
+    return {
+      items: [],
+      totalCount,
+    };
   }
 
   const subscriptionIds = Array.from(
@@ -146,28 +160,31 @@ export async function listPendingReviewSubscriptionEvents(
     ((users.data ?? []) as PendingReviewUserRow[]).map((row) => [row.id, row]),
   );
 
-  return events.map((event) => {
-    const subscription = event.subscription_id
-      ? subscriptionsById.get(event.subscription_id)
-      : null;
-    const resolvedUserId = event.user_id ?? subscription?.user_id ?? null;
-    const user = resolvedUserId ? usersById.get(resolvedUserId) : null;
+  return {
+    items: events.map((event) => {
+      const subscription = event.subscription_id
+        ? subscriptionsById.get(event.subscription_id)
+        : null;
+      const resolvedUserId = event.user_id ?? subscription?.user_id ?? null;
+      const user = resolvedUserId ? usersById.get(resolvedUserId) : null;
 
-    return {
-      id: event.id,
-      eventType: event.event_type,
-      source: event.source,
-      occurredAt: event.occurred_at,
-      amountCents: event.amount_cents,
-      currency: event.currency,
-      reasonCode: event.error_code,
-      reasonLabel: getPendingReviewReasonLabel(event.error_code),
-      subscriptionId: event.subscription_id,
-      subscriptionPlan: subscription?.plan ?? null,
-      expectedAmountCents: subscription?.amount_cents ?? null,
-      userId: resolvedUserId,
-      userName: user?.full_name ?? null,
-      userWhatsapp: user?.whatsapp ?? null,
-    } satisfies PendingReviewSubscriptionItem;
-  });
+      return {
+        id: event.id,
+        eventType: event.event_type,
+        source: event.source,
+        occurredAt: event.occurred_at,
+        amountCents: event.amount_cents,
+        currency: event.currency,
+        reasonCode: event.error_code,
+        reasonLabel: getPendingReviewReasonLabel(event.error_code),
+        subscriptionId: event.subscription_id,
+        subscriptionPlan: subscription?.plan ?? null,
+        expectedAmountCents: subscription?.amount_cents ?? null,
+        userId: resolvedUserId,
+        userName: user?.full_name ?? event.metadata?.full_name ?? null,
+        userWhatsapp: user?.whatsapp ?? event.metadata?.whatsapp ?? null,
+      } satisfies PendingReviewSubscriptionItem;
+    }),
+    totalCount,
+  };
 }

@@ -104,10 +104,19 @@ test("manual subscription actions reroute through applySubscriptionEvent", () =>
 test("subscriptions page wires pending review visibility for manual follow-up", () => {
   const pageSource = readFileOrEmpty(subscriptionsPagePath);
   const dataSource = readFileOrEmpty(subscriptionEventsDataPath);
+  const subscriptionsSource = readFileOrEmpty(subscriptionsDataPath);
 
   assert.match(pageSource, /listPendingReviewSubscriptionEvents/);
-  assert.match(pageSource, /PendingReviewSubscriptionsPanel items=\{pendingReviewItems\}/);
+  assert.match(
+    pageSource,
+    /PendingReviewSubscriptionsPanel[\s\S]*items=\{pendingReview\.items\}[\s\S]*totalCount=\{pendingReview\.totalCount\}/,
+  );
   assert.match(dataSource, /from\("subscription_events"\)/);
   assert.match(dataSource, /eq\("status", "pending_review"\)/);
   assert.match(dataSource, /order\("occurred_at", \{ ascending: false \}\)/);
+  assert.match(dataSource, /count:\s*"exact"/);
+  assert.match(dataSource, /metadata/);
+  assert.match(subscriptionsSource, /try\s*\{[\s\S]*applySubscriptionEvent\(/);
+  assert.match(subscriptionsSource, /catch \(error\)/);
+  assert.match(subscriptionsSource, /outcome:\s*"error"/);
 });

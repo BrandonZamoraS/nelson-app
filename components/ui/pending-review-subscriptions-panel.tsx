@@ -26,8 +26,10 @@ function formatAmount(amountCents: number | null, currency: "USD") {
 
 export function PendingReviewSubscriptionsPanel({
   items,
+  totalCount = items.length,
 }: {
   items: PendingReviewSubscriptionItem[];
+  totalCount?: number;
 }) {
   return (
     <section className="panel-block">
@@ -38,7 +40,7 @@ export function PendingReviewSubscriptionsPanel({
             Visibilidad rápida para seguimiento manual antes de acreditar acceso.
           </p>
         </div>
-        <span className="badge badge-warning">{items.length} abiertos</span>
+        <span className="badge badge-warning">{totalCount} abiertos</span>
       </div>
 
       {items.length === 0 ? (

@@ -68,17 +68,39 @@ export async function patchSubscriptionStatus(
   input: PatchSubscriptionStatusInput,
   actorAdminId?: string | null,
 ) {
-  const result = await applySubscriptionEvent({
-    idempotency_key: `manual-status:${subscriptionId}:${input.status}:${Date.now()}`,
-    event_type: "manual_status_change",
-    source: "manual",
-    subscription_id: subscriptionId,
-    target_status: input.status,
-    occurred_at: new Date().toISOString(),
-    metadata: {
-      actor_admin_id: actorAdminId ?? null,
-    },
-  });
+  let result;
+
+  try {
+    result = await applySubscriptionEvent({
+      idempotency_key: `manual-status:${subscriptionId}:${input.status}:${Date.now()}`,
+      event_type: "manual_status_change",
+      source: "manual",
+      subscription_id: subscriptionId,
+      target_status: input.status,
+      occurred_at: new Date().toISOString(),
+      metadata: {
+        actor_admin_id: actorAdminId ?? null,
+      },
+    });
+  } catch (error) {
+    await logAudit(
+      toManualSubscriptionAuditEntry({
+        actorAdminId,
+        outcome: "error",
+        result: {
+          duplicate: false,
+          event: null,
+          subscription: null,
+          payment: null,
+          user: null,
+        },
+        subscriptionId,
+        targetStatus: input.status,
+      }),
+    );
+
+    throw error;
+  }
 
   try {
     const subscription = ensureManualSubscriptionEventProcessed(result);
@@ -113,16 +135,38 @@ export async function terminateSubscription(
   subscriptionId: string,
   actorAdminId?: string | null,
 ) {
-  const result = await applySubscriptionEvent({
-    idempotency_key: `manual-terminate:${subscriptionId}:${Date.now()}`,
-    event_type: "subscription_cancelled",
-    source: "manual",
-    subscription_id: subscriptionId,
-    occurred_at: new Date().toISOString(),
-    metadata: {
-      actor_admin_id: actorAdminId ?? null,
-    },
-  });
+  let result;
+
+  try {
+    result = await applySubscriptionEvent({
+      idempotency_key: `manual-terminate:${subscriptionId}:${Date.now()}`,
+      event_type: "subscription_cancelled",
+      source: "manual",
+      subscription_id: subscriptionId,
+      occurred_at: new Date().toISOString(),
+      metadata: {
+        actor_admin_id: actorAdminId ?? null,
+      },
+    });
+  } catch (error) {
+    await logAudit(
+      toManualSubscriptionAuditEntry({
+        actorAdminId,
+        outcome: "error",
+        result: {
+          duplicate: false,
+          event: null,
+          subscription: null,
+          payment: null,
+          user: null,
+        },
+        subscriptionId,
+        targetStatus: "terminada",
+      }),
+    );
+
+    throw error;
+  }
 
   try {
     const subscription = ensureManualSubscriptionEventProcessed(result);

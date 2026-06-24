@@ -134,6 +134,14 @@ test("createUserWithSubscriptionUsingClient reactivates an inactive WhatsApp ide
       };
     }
 
+    if (
+      operation.table === "subscriptions" &&
+      operation.action === "select" &&
+      operation.filters.user_id === inactiveUser.id
+    ) {
+      return { data: null, error: null };
+    }
+
     if (operation.table === "subscriptions" && operation.action === "insert") {
       return { data: subscription, error: null };
     }
@@ -161,6 +169,186 @@ test("createUserWithSubscriptionUsingClient reactivates an inactive WhatsApp ide
     is_active: true,
     deactivated_at: null,
   });
+});
+
+test("createUserWithSubscriptionUsingClient reuses an existing subscription for a reactivated user", async () => {
+  const operations: FakeOperation[] = [];
+  const inactiveUser = {
+    id: "user-inactive",
+    full_name: "Maria Antigua",
+    whatsapp: createInput.whatsapp,
+    is_active: false,
+    deactivated_at: "2026-06-01T00:00:00.000Z",
+    created_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-06-01T00:00:00.000Z",
+  };
+  const existingSubscription = {
+    id: "sub-existing",
+    user_id: inactiveUser.id,
+    plan: "Plan anterior",
+    amount_cents: 1500,
+    currency: "USD",
+    status: "terminada",
+    start_date: "2026-05-01",
+    next_billing_date: null,
+    source: "manual",
+    created_at: "2026-05-01T00:00:00.000Z",
+    updated_at: "2026-06-01T00:00:00.000Z",
+  };
+
+  const client = createFakeClient((operation) => {
+    operations.push(operation);
+
+    if (operation.table === "users" && operation.action === "insert") {
+      return {
+        data: null,
+        error: { code: "23505", message: "duplicate key value violates whatsapp" },
+      };
+    }
+
+    if (operation.table === "users" && operation.action === "select") {
+      return { data: inactiveUser, error: null };
+    }
+
+    if (operation.table === "users" && operation.action === "update") {
+      return {
+        data: {
+          ...inactiveUser,
+          full_name: createInput.full_name,
+          is_active: true,
+          deactivated_at: null,
+        },
+        error: null,
+      };
+    }
+
+    if (
+      operation.table === "subscriptions" &&
+      operation.action === "select" &&
+      operation.filters.user_id === inactiveUser.id
+    ) {
+      return { data: existingSubscription, error: null };
+    }
+
+    if (
+      operation.table === "subscriptions" &&
+      operation.action === "update" &&
+      operation.filters.id === existingSubscription.id
+    ) {
+      return {
+        data: {
+          ...existingSubscription,
+          plan: createInput.plan,
+          amount_cents: createInput.amount_cents,
+          status: createInput.status,
+          start_date: createInput.start_date,
+          next_billing_date: createInput.next_billing_date,
+          source: createInput.source,
+        },
+        error: null,
+      };
+    }
+
+    throw new Error(`Unhandled operation: ${JSON.stringify(operation)}`);
+  });
+
+  const result = await createUserWithSubscriptionUsingClient(client, createInput, async () => {}, "admin-1");
+
+  assert.equal(result.subscription.id, existingSubscription.id);
+  assert.equal(
+    operations.some(
+      (operation) => operation.table === "subscriptions" && operation.action === "insert",
+    ),
+    false,
+  );
+});
+
+test("createUserWithSubscriptionUsingClient rolls back a reactivated user when subscription persistence fails", async () => {
+  const operations: FakeOperation[] = [];
+  const inactiveUser = {
+    id: "user-inactive",
+    full_name: "Maria Antigua",
+    whatsapp: createInput.whatsapp,
+    is_active: false,
+    deactivated_at: "2026-06-01T00:00:00.000Z",
+    created_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-06-01T00:00:00.000Z",
+  };
+
+  const client = createFakeClient((operation) => {
+    operations.push(operation);
+
+    if (operation.table === "users" && operation.action === "insert") {
+      return {
+        data: null,
+        error: { code: "23505", message: "duplicate key value violates whatsapp" },
+      };
+    }
+
+    if (operation.table === "users" && operation.action === "select") {
+      return { data: inactiveUser, error: null };
+    }
+
+    if (
+      operation.table === "users" &&
+      operation.action === "update" &&
+      operation.filters.id === inactiveUser.id &&
+      (operation.payload as Record<string, unknown>).is_active === true
+    ) {
+      return {
+        data: {
+          ...inactiveUser,
+          full_name: createInput.full_name,
+          is_active: true,
+          deactivated_at: null,
+        },
+        error: null,
+      };
+    }
+
+    if (
+      operation.table === "subscriptions" &&
+      operation.action === "select" &&
+      operation.filters.user_id === inactiveUser.id
+    ) {
+      return { data: null, error: null };
+    }
+
+    if (operation.table === "subscriptions" && operation.action === "insert") {
+      return { data: null, error: { message: "subscription exploded" } };
+    }
+
+    if (
+      operation.table === "users" &&
+      operation.action === "update" &&
+      operation.filters.id === inactiveUser.id &&
+      (operation.payload as Record<string, unknown>).is_active === false
+    ) {
+      return { data: inactiveUser, error: null };
+    }
+
+    throw new Error(`Unhandled operation: ${JSON.stringify(operation)}`);
+  });
+
+  await assert.rejects(
+    () => createUserWithSubscriptionUsingClient(client, createInput, async () => {}, "admin-1"),
+    (error: unknown) => {
+      assert.ok(error instanceof AppError);
+      assert.equal(error.code, "subscription_create_failed");
+      return true;
+    },
+  );
+
+  assert.equal(
+    operations.some(
+      (operation) =>
+        operation.table === "users" &&
+        operation.action === "update" &&
+        operation.filters.id === inactiveUser.id &&
+        (operation.payload as Record<string, unknown>).is_active === false,
+    ),
+    true,
+  );
 });
 
 test("createUserWithSubscriptionUsingClient still reports duplicate for an active WhatsApp identity", async () => {
@@ -274,4 +462,59 @@ test("updateUserAndSubscriptionUsingClient rejects inactive duplicate WhatsApp i
   assert.equal(auditCalls.length, 1);
   assert.equal(auditCalls[0]?.result, "error");
   assert.deepEqual(auditCalls[0]?.detail, { reason: "duplicate_whatsapp" });
+});
+
+test("updateUserAndSubscriptionUsingClient does not clear soft-delete flags during ordinary edits", async () => {
+  const operations: FakeOperation[] = [];
+
+  const client = createFakeClient((operation) => {
+    operations.push(operation);
+
+    if (
+      operation.table === "users" &&
+      operation.action === "update" &&
+      operation.filters.id === "user-1"
+    ) {
+      return { data: { id: "user-1" }, error: null };
+    }
+
+    if (
+      operation.table === "subscriptions" &&
+      operation.action === "select" &&
+      operation.filters.user_id === "user-1"
+    ) {
+      return { data: { id: "sub-1" }, error: null };
+    }
+
+    if (
+      operation.table === "subscriptions" &&
+      operation.action === "update" &&
+      operation.filters.id === "sub-1"
+    ) {
+      return { data: { id: "sub-1" }, error: null };
+    }
+
+    throw new Error(`Unhandled operation: ${JSON.stringify(operation)}`);
+  });
+
+  await updateUserAndSubscriptionUsingClient(
+    client,
+    "user-1",
+    createInput,
+    async () => {},
+    async () => ({ user: { id: "user-1" } as never, subscription: null }),
+    "admin-1",
+  );
+
+  const userUpdate = operations.find(
+    (operation) =>
+      operation.table === "users" &&
+      operation.action === "update" &&
+      operation.filters.id === "user-1",
+  );
+
+  assert.deepEqual(userUpdate?.payload, {
+    full_name: createInput.full_name,
+    whatsapp: createInput.whatsapp,
+  });
 });

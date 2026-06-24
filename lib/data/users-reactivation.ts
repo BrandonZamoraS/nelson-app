@@ -111,6 +111,75 @@ async function createSubscription(
   return data as SubscriptionRecord;
 }
 
+async function findSubscriptionByUserId(client: SupabaseLikeClient, userId: string) {
+  const { data, error } = await asTableBuilder(client.from("subscriptions"))
+    .select(
+      "id,user_id,plan,amount_cents,currency,status,start_date,next_billing_date,source,created_at,updated_at",
+    )
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) {
+    throw new AppError(error.message ?? "Error leyendo suscripción", 500, "subscription_read_failed");
+  }
+
+  return (data as SubscriptionRecord | null) ?? null;
+}
+
+async function updateSubscription(
+  client: SupabaseLikeClient,
+  subscriptionId: string,
+  input: CreateUserInput,
+) {
+  const { data, error } = await asTableBuilder(client.from("subscriptions"))
+    .update({
+      plan: input.plan,
+      amount_cents: input.amount_cents,
+      status: input.status,
+      start_date: input.start_date,
+      next_billing_date: input.next_billing_date ?? null,
+      source: input.source,
+    })
+    .eq("id", subscriptionId)
+    .select(
+      "id,user_id,plan,amount_cents,currency,status,start_date,next_billing_date,source,created_at,updated_at",
+    )
+    .single();
+
+  if (error) {
+    throw new AppError(error.message ?? "Error actualizando suscripción", 500, "subscription_update_failed");
+  }
+
+  return data as SubscriptionRecord;
+}
+
+async function upsertSubscriptionForUser(
+  client: SupabaseLikeClient,
+  userId: string,
+  input: CreateUserInput,
+) {
+  const existingSubscription = await findSubscriptionByUserId(client, userId);
+
+  if (existingSubscription) {
+    return updateSubscription(client, existingSubscription.id, input);
+  }
+
+  return createSubscription(client, userId, input);
+}
+
+async function restoreInactiveUser(client: SupabaseLikeClient, user: UserRecord) {
+  await asTableBuilder(client.from("users"))
+    .update({
+      full_name: user.full_name,
+      whatsapp: user.whatsapp,
+      is_active: false,
+      deactivated_at: user.deactivated_at ?? null,
+    })
+    .eq("id", user.id)
+    .select(USER_COLUMNS)
+    .single();
+}
+
 export async function createUserWithSubscriptionUsingClient(
   client: SupabaseLikeClient,
   input: CreateUserInput,
@@ -118,6 +187,7 @@ export async function createUserWithSubscriptionUsingClient(
   actorAdminId?: string | null,
 ) {
   let insertedFreshUser = false;
+  let reactivatedUserSnapshot: UserRecord | null = null;
 
   const { data: insertedUser, error: userError } = await asTableBuilder(client.from("users"))
     .insert({
@@ -148,6 +218,7 @@ export async function createUserWithSubscriptionUsingClient(
       throw new AppError("WhatsApp duplicado", 409, "duplicate_whatsapp");
     }
 
+    reactivatedUserSnapshot = existingUser;
     user = await reactivateUser(client, existingUser.id, input.full_name, input.whatsapp);
   } else {
     user = insertedUser as UserRecord;
@@ -155,7 +226,7 @@ export async function createUserWithSubscriptionUsingClient(
   }
 
   try {
-    const subscription = await createSubscription(client, user.id, input);
+    const subscription = await upsertSubscriptionForUser(client, user.id, input);
 
     await logAudit({
       actorAuthId: actorAdminId,
@@ -177,6 +248,8 @@ export async function createUserWithSubscriptionUsingClient(
   } catch (error) {
     if (insertedFreshUser) {
       await asTableBuilder(client.from("users")).delete().eq("id", user.id);
+    } else if (reactivatedUserSnapshot) {
+      await restoreInactiveUser(client, reactivatedUserSnapshot);
     }
     throw error;
   }
@@ -194,8 +267,6 @@ export async function updateUserAndSubscriptionUsingClient(
     .update({
       full_name: input.full_name,
       whatsapp: input.whatsapp,
-      is_active: true,
-      deactivated_at: null,
     })
     .eq("id", userId)
     .select(USER_COLUMNS)
