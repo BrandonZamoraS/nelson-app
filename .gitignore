@@ -49,3 +49,6 @@ node_modules/
 /playwright/.cache/
 /playwright/.auth/
 
+# Gentle AI artifacts
+/.atl/
+
