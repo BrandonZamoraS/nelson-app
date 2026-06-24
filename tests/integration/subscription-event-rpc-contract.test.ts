@@ -107,7 +107,39 @@ test("apply_subscription_event RPC rejects user identity conflicts against the l
 test("apply_subscription_event RPC returns rejected events from the exception handler instead of promising a rolled-back audit row", () => {
   const sql = readMigration();
 
-  assert.match(sql, /exception[\s\S]*when others then[\s\S]*status = 'rejected'/i);
+  assert.match(sql, /begin[\s\S]*insert into public\.subscription_events[\s\S]*begin[\s\S]*exception[\s\S]*when others then/i);
+  assert.match(sql, /when others then[\s\S]*(insert into public\.subscription_events|on conflict \(idempotency_key\) do update)[\s\S]*status = 'rejected'/i);
   assert.match(sql, /return jsonb_build_object\([\s\S]*'event', to_jsonb\(v_event\)/i);
   assert.doesNotMatch(sql, /exception[\s\S]*when others then[\s\S]*raise;/i);
+});
+
+test("apply_subscription_event RPC stores unresolved subscription and user identifiers in metadata before FK resolution", () => {
+  const sql = readMigration();
+
+  assert.match(sql, /'requested_subscription_id',[\s\S]*event_payload->>'subscription_id'/i);
+  assert.match(sql, /'requested_user_id',[\s\S]*event_payload->>'user_id'/i);
+  assert.match(sql, /insert into public\.subscription_events[\s\S]*subscription_id,[\s\S]*user_id[\s\S]*values[\s\S]*null,[\s\S]*null/i);
+});
+
+test("apply_subscription_event RPC rejects conflicting explicit user ids against WhatsApp identities before subscription lookup succeeds", () => {
+  const sql = readMigration();
+
+  assert.match(sql, /if v_subscription\.id is null and v_user_id is not null and v_user\.id is not null and v_user_id <> v_user\.id then/i);
+  assert.match(sql, /v_error_code := 'subscription_whatsapp_conflict';/i);
+});
+
+test("apply_subscription_event RPC marks first-payment user reactivations in event metadata", () => {
+  const sql = readMigration();
+
+  assert.match(sql, /if v_user\.id is not null and v_user\.is_active = false then[\s\S]*update public\.users[\s\S]*v_reactivated_user := true/i);
+  assert.match(sql, /'reactivated_user',[\s\S]*case when v_reactivated_user then true else null end/i);
+});
+
+test("apply_subscription_event RPC keeps subscription_events read-only for authenticated admins", () => {
+  const sql = readMigration();
+
+  assert.match(sql, /grant select on table public\.subscription_events to authenticated/i);
+  assert.doesNotMatch(sql, /grant select, insert, update on table public\.subscription_events to authenticated/i);
+  assert.doesNotMatch(sql, /create policy subscription_events_insert_active_admin/i);
+  assert.doesNotMatch(sql, /create policy subscription_events_update_active_admin/i);
 });

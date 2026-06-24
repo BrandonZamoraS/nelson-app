@@ -518,3 +518,82 @@ test("updateUserAndSubscriptionUsingClient does not clear soft-delete flags duri
     whatsapp: createInput.whatsapp,
   });
 });
+
+test("updateUserAndSubscriptionUsingClient routes status changes through the canonical subscription event processor", async () => {
+  const operations: FakeOperation[] = [];
+  const appliedEvents: Array<Record<string, unknown>> = [];
+
+  const client = createFakeClient((operation) => {
+    operations.push(operation);
+
+    if (
+      operation.table === "users" &&
+      operation.action === "update" &&
+      operation.filters.id === "user-1"
+    ) {
+      return { data: { id: "user-1" }, error: null };
+    }
+
+    if (
+      operation.table === "subscriptions" &&
+      operation.action === "select" &&
+      operation.filters.user_id === "user-1"
+    ) {
+      return {
+        data: {
+          id: "sub-1",
+          status: "gracia",
+        },
+        error: null,
+      };
+    }
+
+    if (
+      operation.table === "subscriptions" &&
+      operation.action === "update" &&
+      operation.filters.id === "sub-1"
+    ) {
+      return { data: { id: "sub-1" }, error: null };
+    }
+
+    throw new Error(`Unhandled operation: ${JSON.stringify(operation)}`);
+  });
+
+  await updateUserAndSubscriptionUsingClient(
+    client,
+    "user-1",
+    createInput,
+    async () => {},
+    async () => ({ user: { id: "user-1" } as never, subscription: null }),
+    "admin-1",
+    async (payload) => {
+      appliedEvents.push(payload as Record<string, unknown>);
+      return {
+        duplicate: false,
+        event: { id: "evt-1", status: "processed", error_code: null },
+        subscription: { id: "sub-1", status: createInput.status },
+        payment: null,
+        user: null,
+      };
+    },
+  );
+
+  const subscriptionUpdate = operations.find(
+    (operation) =>
+      operation.table === "subscriptions" &&
+      operation.action === "update" &&
+      operation.filters.id === "sub-1",
+  );
+
+  assert.deepEqual(subscriptionUpdate?.payload, {
+    plan: createInput.plan,
+    amount_cents: createInput.amount_cents,
+    start_date: createInput.start_date,
+    next_billing_date: createInput.next_billing_date,
+    source: createInput.source,
+  });
+  assert.equal(appliedEvents.length, 1);
+  assert.equal(appliedEvents[0]?.event_type, "manual_status_change");
+  assert.equal(appliedEvents[0]?.subscription_id, "sub-1");
+  assert.equal(appliedEvents[0]?.target_status, createInput.status);
+});

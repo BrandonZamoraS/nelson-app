@@ -1,6 +1,7 @@
 import { AppError } from "@/lib/errors/app-error";
 import type {
   SubscriptionRecord,
+  SubscriptionStatus,
   UserRecord,
   UserWithSubscription,
 } from "@/lib/types/domain";
@@ -40,6 +41,26 @@ type AuditEntry = {
 
 type AuditLogger = (entry: AuditEntry) => Promise<void>;
 type ReadUserById = (userId: string) => Promise<UserWithSubscription>;
+type ApplySubscriptionStatusChangeResult = {
+  event?: {
+    status?: string;
+    error_code?: string | null;
+  } | null;
+};
+type ApplySubscriptionStatusChangeInput = {
+  idempotency_key: string;
+  event_type: "manual_status_change";
+  source: string;
+  subscription_id: string;
+  target_status: SubscriptionStatus;
+  occurred_at: string;
+  metadata: {
+    actor_admin_id: string | null;
+  };
+};
+type ApplySubscriptionStatusChange = (
+  input: ApplySubscriptionStatusChangeInput,
+) => Promise<ApplySubscriptionStatusChangeResult>;
 
 const USER_COLUMNS = "id,full_name,whatsapp,is_active,deactivated_at,created_at,updated_at";
 
@@ -262,6 +283,11 @@ export async function updateUserAndSubscriptionUsingClient(
   logAudit: AuditLogger,
   readUserById: ReadUserById,
   actorAdminId?: string | null,
+  applySubscriptionStatusChange: ApplySubscriptionStatusChange = async (payload) => {
+    const { applySubscriptionEvent } = await import("@/lib/data/subscription-events");
+
+    return applySubscriptionEvent(payload);
+  },
 ) {
   const { error: userError } = await asTableBuilder(client.from("users"))
     .update({
@@ -293,7 +319,7 @@ export async function updateUserAndSubscriptionUsingClient(
   const { data: subscription, error: subscriptionReadError } = await asTableBuilder(
     client.from("subscriptions"),
   )
-    .select("id")
+    .select("id,status")
     .eq("user_id", userId)
     .maybeSingle();
 
@@ -315,7 +341,6 @@ export async function updateUserAndSubscriptionUsingClient(
     .update({
       plan: input.plan,
       amount_cents: input.amount_cents,
-      status: input.status,
       start_date: input.start_date,
       next_billing_date: input.next_billing_date,
       source: input.source,
@@ -330,6 +355,30 @@ export async function updateUserAndSubscriptionUsingClient(
       500,
       "subscription_update_failed",
     );
+  }
+
+  const subscriptionRecord = subscription as { id: string; status?: string };
+
+  if (typeof subscriptionRecord.status === "string" && subscriptionRecord.status !== input.status) {
+    const eventResult = await applySubscriptionStatusChange({
+      idempotency_key: `manual-status:${subscriptionRecord.id}:${input.status}:${Date.now()}`,
+      event_type: "manual_status_change",
+      source: "manual",
+      subscription_id: subscriptionRecord.id,
+      target_status: input.status,
+      occurred_at: new Date().toISOString(),
+      metadata: {
+        actor_admin_id: actorAdminId ?? null,
+      },
+    });
+
+    if (eventResult.event?.status !== "processed" && eventResult.event?.status !== "ignored") {
+      throw new AppError(
+        `La suscripción no pudo actualizarse (${String(eventResult.event?.error_code ?? eventResult.event?.status ?? "unknown")})`,
+        409,
+        String(eventResult.event?.error_code ?? "subscription_status_change_failed"),
+      );
+    }
   }
 
   await logAudit({

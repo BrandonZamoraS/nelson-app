@@ -103,3 +103,22 @@ test("ensureManualSubscriptionEventProcessed does not report success when the ev
     },
   );
 });
+
+test("ensureManualSubscriptionEventProcessed treats ignored terminal cancels as a successful no-op", () => {
+  const result = ensureManualSubscriptionEventProcessed(
+    {
+      duplicate: false,
+      event: {
+        id: "evt-4",
+        status: "ignored",
+        error_code: null,
+      },
+      subscription: { ...subscription, status: "terminada", next_billing_date: null },
+      payment: null,
+      user: null,
+    },
+    { allowIgnoredTerminalCancel: true },
+  );
+
+  assert.deepEqual(result, { ...subscription, status: "terminada", next_billing_date: null });
+});

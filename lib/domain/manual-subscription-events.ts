@@ -15,6 +15,10 @@ type ManualSubscriptionEventResult = {
   user: Record<string, unknown> | null;
 };
 
+type EnsureManualSubscriptionEventProcessedOptions = {
+  allowIgnoredTerminalCancel?: boolean;
+};
+
 type AuditOutcome = "ok" | "error";
 
 type ManualSubscriptionAuditEntryInput = {
@@ -54,7 +58,17 @@ function mapEventFailureToAppError(event: ManualSubscriptionEvent | null) {
 
 export function ensureManualSubscriptionEventProcessed(
   result: ManualSubscriptionEventResult,
+  options: EnsureManualSubscriptionEventProcessedOptions = {},
 ) {
+  if (
+    options.allowIgnoredTerminalCancel &&
+    result.event?.status === "ignored" &&
+    result.subscription &&
+    result.subscription.status === "terminada"
+  ) {
+    return result.subscription as SubscriptionRecord;
+  }
+
   if (result.event?.status !== "processed") {
     throw mapEventFailureToAppError(result.event);
   }

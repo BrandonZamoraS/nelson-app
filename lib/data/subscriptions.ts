@@ -103,7 +103,9 @@ export async function patchSubscriptionStatus(
   }
 
   try {
-    const subscription = ensureManualSubscriptionEventProcessed(result);
+    const subscription = ensureManualSubscriptionEventProcessed(result, {
+      allowIgnoredTerminalCancel: true,
+    });
 
     await logAudit(
       toManualSubscriptionAuditEntry({
