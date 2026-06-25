@@ -8,6 +8,7 @@ import type { UpdateSettingsInput } from "@/lib/validators/settings";
 const defaultSettings = {
   id: 1,
   grace_days: 3,
+  initial_subscription_amount_cents: 2000,
   payment_reminder_template:
     "Hola {{name}}, tu pago vence el {{next_billing_date}}. Evita suspension renovando hoy.",
   suspension_notice_template:
@@ -19,7 +20,7 @@ export async function getSettings() {
   const { data, error } = await client
     .from("app_settings")
     .select(
-      "id,grace_days,payment_reminder_template,suspension_notice_template,updated_at",
+      "id,grace_days,initial_subscription_amount_cents,payment_reminder_template,suspension_notice_template,updated_at",
     )
     .eq("id", 1)
     .maybeSingle();
@@ -36,7 +37,7 @@ export async function getSettings() {
     .from("app_settings")
     .insert(defaultSettings)
     .select(
-      "id,grace_days,payment_reminder_template,suspension_notice_template,updated_at",
+      "id,grace_days,initial_subscription_amount_cents,payment_reminder_template,suspension_notice_template,updated_at",
     )
     .single();
 
@@ -57,7 +58,7 @@ export async function patchSettings(
     .update(input)
     .eq("id", 1)
     .select(
-      "id,grace_days,payment_reminder_template,suspension_notice_template,updated_at",
+      "id,grace_days,initial_subscription_amount_cents,payment_reminder_template,suspension_notice_template,updated_at",
     )
     .single();
 

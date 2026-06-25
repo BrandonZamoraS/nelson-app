@@ -1,5 +1,9 @@
 import { logAudit } from "@/lib/audit/log-audit";
-import { isValidStatusTransition } from "@/lib/domain/subscription-status";
+import { applySubscriptionEvent } from "@/lib/data/subscription-events";
+import {
+  ensureManualSubscriptionEventProcessed,
+  toManualSubscriptionAuditEntry,
+} from "@/lib/domain/manual-subscription-events";
 import { AppError } from "@/lib/errors/app-error";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { SubscriptionRecord, SubscriptionStatus } from "@/lib/types/domain";
@@ -56,7 +60,7 @@ export async function listSubscriptions(
     throw new AppError(error.message, 500, "subscriptions_list_failed");
   }
 
-  return (data ?? []) as SubscriptionWithUser[];
+  return (data ?? []) as unknown as SubscriptionWithUser[];
 }
 
 export async function patchSubscriptionStatus(
@@ -64,82 +68,135 @@ export async function patchSubscriptionStatus(
   input: PatchSubscriptionStatusInput,
   actorAdminId?: string | null,
 ) {
-  const client = createSupabaseAdminClient();
-  const { data: subscription, error: readError } = await client
-    .from("subscriptions")
-    .select(
-      "id,user_id,plan,amount_cents,currency,status,start_date,next_billing_date,source,created_at,updated_at",
-    )
-    .eq("id", subscriptionId)
-    .maybeSingle();
+  let result;
 
-  if (readError) {
-    throw new AppError(readError.message, 500, "subscription_read_failed");
-  }
-
-  if (!subscription) {
-    throw new AppError("Suscripción no encontrada", 404, "subscription_not_found");
-  }
-
-  if (!isValidStatusTransition(subscription.status, input.status)) {
-    await logAudit({
-      actorAuthId: actorAdminId,
-      actorAdminId,
-      entityType: "subscription",
-      entityId: subscriptionId,
-      action: "subscription.status.change",
-      detail: {
-        previous_status: subscription.status,
-        target_status: input.status,
-        reason: "invalid_transition",
+  try {
+    result = await applySubscriptionEvent({
+      idempotency_key: `manual-status:${subscriptionId}:${input.status}:${Date.now()}`,
+      event_type: "manual_status_change",
+      source: "manual",
+      subscription_id: subscriptionId,
+      target_status: input.status,
+      occurred_at: new Date().toISOString(),
+      metadata: {
+        actor_admin_id: actorAdminId ?? null,
       },
-      result: "error",
+    });
+  } catch (error) {
+    await logAudit(
+      toManualSubscriptionAuditEntry({
+        actorAdminId,
+        outcome: "error",
+        result: {
+          duplicate: false,
+          event: null,
+          subscription: null,
+          payment: null,
+          user: null,
+        },
+        subscriptionId,
+        targetStatus: input.status,
+      }),
+    );
+
+    throw error;
+  }
+
+  try {
+    const subscription = ensureManualSubscriptionEventProcessed(result, {
+      allowIgnoredTerminalCancel: true,
     });
 
-    throw new AppError("Transición de estado inválida", 409, "invalid_transition");
+    await logAudit(
+      toManualSubscriptionAuditEntry({
+        actorAdminId,
+        outcome: "ok",
+        result,
+        subscriptionId,
+        targetStatus: input.status,
+      }),
+    );
+
+    return subscription;
+  } catch (error) {
+    await logAudit(
+      toManualSubscriptionAuditEntry({
+        actorAdminId,
+        outcome: "error",
+        result,
+        subscriptionId,
+        targetStatus: input.status,
+      }),
+    );
+
+    throw error;
   }
-
-  const updatePayload: Record<string, unknown> = { status: input.status };
-  if (input.status === "terminada") {
-    updatePayload.next_billing_date = null;
-  }
-
-  const { data: updated, error: updateError } = await client
-    .from("subscriptions")
-    .update(updatePayload)
-    .eq("id", subscriptionId)
-    .select(
-      "id,user_id,plan,amount_cents,currency,status,start_date,next_billing_date,source,created_at,updated_at",
-    )
-    .single();
-
-  if (updateError) {
-    throw new AppError(updateError.message, 500, "subscription_update_failed");
-  }
-
-  await logAudit({
-    actorAuthId: actorAdminId,
-    actorAdminId,
-    entityType: "subscription",
-    entityId: subscriptionId,
-    action: "subscription.status.change",
-    detail: {
-      previous_status: subscription.status,
-      target_status: input.status,
-    },
-    result: "ok",
-  });
-
-  return updated as SubscriptionRecord;
 }
 
 export async function terminateSubscription(
   subscriptionId: string,
   actorAdminId?: string | null,
 ) {
-  return patchSubscriptionStatus(
-    subscriptionId,
-    { status: "terminada" },
-    actorAdminId,
-  );
+  let result;
+
+  try {
+    result = await applySubscriptionEvent({
+      idempotency_key: `manual-terminate:${subscriptionId}:${Date.now()}`,
+      event_type: "subscription_cancelled",
+      source: "manual",
+      subscription_id: subscriptionId,
+      occurred_at: new Date().toISOString(),
+      metadata: {
+        actor_admin_id: actorAdminId ?? null,
+      },
+    });
+  } catch (error) {
+    await logAudit(
+      toManualSubscriptionAuditEntry({
+        actorAdminId,
+        outcome: "error",
+        result: {
+          duplicate: false,
+          event: null,
+          subscription: null,
+          payment: null,
+          user: null,
+        },
+        subscriptionId,
+        targetStatus: "terminada",
+      }),
+    );
+
+    throw error;
+  }
+
+  try {
+    const subscription = ensureManualSubscriptionEventProcessed(result, {
+      allowIgnoredTerminalCancel: true,
+    });
+
+    await logAudit(
+      toManualSubscriptionAuditEntry({
+        actorAdminId,
+        outcome: "ok",
+        result,
+        subscriptionId,
+        targetStatus: "terminada",
+      }),
+    );
+
+    return subscription;
+  } catch (error) {
+    await logAudit(
+      toManualSubscriptionAuditEntry({
+        actorAdminId,
+        outcome: "error",
+        result,
+        subscriptionId,
+        targetStatus: "terminada",
+      }),
+    );
+
+    throw error;
+  }
 }

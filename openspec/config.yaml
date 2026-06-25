@@ -1,0 +1,53 @@
+schema: spec-driven
+project: nelson-app
+
+context: |
+  Stack: Next.js 16 App Router, React 19, TypeScript strict, Supabase SSR/Auth/Postgres, Zod.
+  Architecture: app routes + components/ui + lib helpers + Supabase SQL migrations/functions.
+  Testing: node:test contracts, tsx unit/integration, Playwright E2E with auth stub.
+  Quality: ESLint 9, TypeScript noEmit, CI on Node 20.
+  Conventions: proxy.ts guards private routes, Spanish admin UI copy, @/* path alias.
+
+strict_tdd: true
+
+testing:
+  detected: 2026-06-22
+  test_command: npm test
+  e2e_command: npm run test:e2e
+  build_command: npm run build
+  layers:
+    contracts: node --test tests/f00-foundation-contract.test.mjs tests/f01-schema-contract.test.mjs
+    unit: tsx --test tests/unit/*.test.ts
+    integration: tsx --test tests/integration/*.test.ts
+    e2e: playwright test
+  quality:
+    lint: npm run lint
+    typecheck: npm run typecheck
+    formatter: ""
+    coverage: ""
+
+rules:
+  proposal:
+    - Keep scope tied to one admin capability or workflow.
+    - Call out Supabase schema or auth impacts explicitly.
+  specs:
+    - Use Given/When/Then scenarios.
+    - Distinguish admin auth, RLS, and UI behavior when relevant.
+  design:
+    - Reuse existing Next.js App Router and Supabase server/client patterns.
+    - Document migration and audit-log effects before DB changes.
+  tasks:
+    - Keep slices reviewable under 400 changed lines when possible.
+    - Separate UI, app logic, and database work when they can be reviewed independently.
+  apply:
+    - Follow existing file conventions and @/* imports.
+    - Keep Spanish UI copy aligned with current admin surface.
+    tdd: true
+    test_command: npm test
+  verify:
+    test_command: npm test
+    build_command: npm run build
+    e2e_command: npm run test:e2e
+    coverage_threshold: 0
+  archive:
+    - Preserve spec and migration history; do not rewrite archived change records.

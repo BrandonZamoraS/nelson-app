@@ -69,7 +69,7 @@ export async function listAuditLogs(input: AuditFilterInput) {
   }
 
   return {
-    rows: (data ?? []) as AuditLogRecord[],
+    rows: (data ?? []) as unknown as AuditLogRecord[],
     page: input.page,
     pageSize: input.pageSize,
     total: count ?? 0,

@@ -14,6 +14,8 @@ export type Database = {
           id: string;
           full_name: string;
           whatsapp: string;
+          is_active: boolean;
+          deactivated_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -21,12 +23,16 @@ export type Database = {
           id?: string;
           full_name: string;
           whatsapp: string;
+          is_active?: boolean;
+          deactivated_at?: string | null;
           created_at?: string;
           updated_at?: string;
         };
         Update: {
           full_name?: string;
           whatsapp?: string;
+          is_active?: boolean;
+          deactivated_at?: string | null;
           updated_at?: string;
         };
         Relationships: [];
@@ -103,6 +109,7 @@ export type Database = {
           id: string;
           subscription_id: string;
           user_id: string;
+          event_id: string | null;
           amount_cents: number;
           currency: "USD";
           status: "pending" | "paid" | "failed" | "refunded";
@@ -117,6 +124,7 @@ export type Database = {
           id?: string;
           subscription_id: string;
           user_id: string;
+          event_id?: string | null;
           amount_cents: number;
           currency?: "USD";
           status: "pending" | "paid" | "failed" | "refunded";
@@ -130,6 +138,7 @@ export type Database = {
         Update: {
           subscription_id?: string;
           user_id?: string;
+          event_id?: string | null;
           amount_cents?: number;
           currency?: "USD";
           status?: "pending" | "paid" | "failed" | "refunded";
@@ -176,6 +185,7 @@ export type Database = {
         Row: {
           id: number;
           grace_days: number;
+          initial_subscription_amount_cents: number;
           payment_reminder_template: string;
           suspension_notice_template: string;
           updated_at: string;
@@ -183,21 +193,83 @@ export type Database = {
         Insert: {
           id?: number;
           grace_days: number;
+          initial_subscription_amount_cents?: number;
           payment_reminder_template: string;
           suspension_notice_template: string;
           updated_at?: string;
         };
         Update: {
           grace_days?: number;
+          initial_subscription_amount_cents?: number;
           payment_reminder_template?: string;
           suspension_notice_template?: string;
           updated_at?: string;
         };
         Relationships: [];
       };
+      subscription_events: {
+        Row: {
+          id: string;
+          idempotency_key: string;
+          event_type: string;
+          source: string;
+          subscription_id: string | null;
+          user_id: string | null;
+          amount_cents: number | null;
+          currency: "USD";
+          occurred_at: string;
+          paid_at: string | null;
+          status: "processed" | "ignored" | "rejected" | "pending_review";
+          error_code: string | null;
+          metadata: Json;
+          processed_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          idempotency_key: string;
+          event_type: string;
+          source: string;
+          subscription_id?: string | null;
+          user_id?: string | null;
+          amount_cents?: number | null;
+          currency?: "USD";
+          occurred_at: string;
+          paid_at?: string | null;
+          status?: "processed" | "ignored" | "rejected" | "pending_review";
+          error_code?: string | null;
+          metadata?: Json;
+          processed_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          idempotency_key?: string;
+          event_type?: string;
+          source?: string;
+          subscription_id?: string | null;
+          user_id?: string | null;
+          amount_cents?: number | null;
+          currency?: "USD";
+          occurred_at?: string;
+          paid_at?: string | null;
+          status?: "processed" | "ignored" | "rejected" | "pending_review";
+          error_code?: string | null;
+          metadata?: Json;
+          processed_at?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      apply_subscription_event: {
+        Args: { event_payload: Json };
+        Returns: Json;
+      };
+    };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;
   };

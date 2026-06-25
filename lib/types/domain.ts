@@ -25,6 +25,8 @@ export type UserRecord = {
   id: string;
   full_name: string;
   whatsapp: string;
+  is_active?: boolean;
+  deactivated_at?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -55,6 +57,7 @@ export type PaymentRecord = {
   id: string;
   subscription_id: string;
   user_id: string;
+  event_id?: string | null;
   amount_cents: number;
   currency: "USD";
   status: PaymentStatus;
@@ -79,7 +82,44 @@ export type AdminProfileRecord = {
 export type AppSettingsRecord = {
   id: number;
   grace_days: number;
+  initial_subscription_amount_cents: number;
   payment_reminder_template: string;
   suspension_notice_template: string;
   updated_at: string;
+};
+
+export type SubscriptionEventRecord = {
+  id: string;
+  idempotency_key: string;
+  event_type: string;
+  source: string;
+  subscription_id: string | null;
+  user_id: string | null;
+  amount_cents: number | null;
+  currency: "USD";
+  occurred_at: string;
+  paid_at: string | null;
+  status: "processed" | "ignored" | "rejected" | "pending_review";
+  error_code: string | null;
+  metadata: Record<string, unknown>;
+  processed_at: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PendingReviewSubscriptionItem = {
+  id: string;
+  eventType: string;
+  source: string;
+  occurredAt: string;
+  amountCents: number | null;
+  currency: "USD";
+  reasonCode: string | null;
+  reasonLabel: string;
+  subscriptionId: string | null;
+  subscriptionPlan: string | null;
+  expectedAmountCents: number | null;
+  userId: string | null;
+  userName: string | null;
+  userWhatsapp: string | null;
 };

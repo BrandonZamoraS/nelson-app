@@ -1,5 +1,9 @@
 import { AppError } from "@/lib/errors/app-error";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
+import {
+  createUserWithSubscriptionUsingClient,
+  updateUserAndSubscriptionUsingClient,
+} from "@/lib/data/users-reactivation";
 import type {
   SubscriptionRecord,
   SubscriptionStatus,
@@ -34,6 +38,8 @@ function mapUserRecord(raw: unknown): UserWithSubscription {
       id: row.id,
       full_name: row.full_name,
       whatsapp: row.whatsapp,
+      is_active: row.is_active,
+      deactivated_at: row.deactivated_at,
       created_at: row.created_at,
       updated_at: row.updated_at,
     },
@@ -47,7 +53,7 @@ export async function listUsers(input: ListUsersInput = {}) {
   let query = client
     .from("users")
     .select(
-      "id,full_name,whatsapp,created_at,updated_at,subscriptions(id,user_id,plan,amount_cents,currency,status,start_date,next_billing_date,source,created_at,updated_at)",
+      "id,full_name,whatsapp,is_active,deactivated_at,created_at,updated_at,subscriptions(id,user_id,plan,amount_cents,currency,status,start_date,next_billing_date,source,created_at,updated_at)",
     )
     .order("created_at", { ascending: false })
     .limit(limit);
@@ -74,7 +80,7 @@ export async function getUserById(userId: string) {
   const { data, error } = await client
     .from("users")
     .select(
-      "id,full_name,whatsapp,created_at,updated_at,subscriptions(id,user_id,plan,amount_cents,currency,status,start_date,next_billing_date,source,created_at,updated_at)",
+      "id,full_name,whatsapp,is_active,deactivated_at,created_at,updated_at,subscriptions(id,user_id,plan,amount_cents,currency,status,start_date,next_billing_date,source,created_at,updated_at)",
     )
     .eq("id", userId)
     .maybeSingle();
@@ -90,82 +96,13 @@ export async function getUserById(userId: string) {
   return mapUserRecord(data);
 }
 
-function isDuplicateWhatsappError(error: { code?: string; message?: string }) {
-  return error.code === "23505" && (error.message ?? "").toLowerCase().includes("whatsapp");
-}
-
 export async function createUserWithSubscription(
   input: CreateUserInput,
   actorAdminId?: string | null,
 ) {
   const client = createSupabaseAdminClient();
 
-  const { data: user, error: userError } = await client
-    .from("users")
-    .insert({
-      full_name: input.full_name,
-      whatsapp: input.whatsapp,
-    })
-    .select("id,full_name,whatsapp,created_at,updated_at")
-    .single();
-
-  if (userError) {
-    if (isDuplicateWhatsappError(userError)) {
-      await logAudit({
-        actorAuthId: actorAdminId,
-        actorAdminId,
-        entityType: "user",
-        entityId: input.whatsapp,
-        action: "user.create",
-        detail: { reason: "duplicate_whatsapp" },
-        result: "error",
-      });
-      throw new AppError("WhatsApp duplicado", 409, "duplicate_whatsapp");
-    }
-
-    throw new AppError(userError.message, 500, "user_create_failed");
-  }
-
-  const { data: subscription, error: subscriptionError } = await client
-    .from("subscriptions")
-    .insert({
-      user_id: user.id,
-      plan: input.plan,
-      amount_cents: input.amount_cents,
-      status: input.status,
-      start_date: input.start_date,
-      next_billing_date: input.next_billing_date ?? null,
-      source: input.source,
-    })
-    .select(
-      "id,user_id,plan,amount_cents,currency,status,start_date,next_billing_date,source,created_at,updated_at",
-    )
-    .single();
-
-  if (subscriptionError) {
-    await client.from("users").delete().eq("id", user.id);
-    throw new AppError(subscriptionError.message, 500, "subscription_create_failed");
-  }
-
-  await logAudit({
-    actorAuthId: actorAdminId,
-    actorAdminId,
-    entityType: "user",
-    entityId: user.id,
-    action: "user.create",
-    detail: {
-      full_name: user.full_name,
-      whatsapp: user.whatsapp,
-      subscription_id: subscription.id,
-      amount_cents: subscription.amount_cents,
-    },
-    result: "ok",
-  });
-
-  return {
-    user: user as UserRecord,
-    subscription: subscription as SubscriptionRecord,
-  };
+  return createUserWithSubscriptionUsingClient(client, input, logAudit, actorAdminId);
 }
 
 export async function updateUserAndSubscription(
@@ -175,84 +112,12 @@ export async function updateUserAndSubscription(
 ) {
   const client = createSupabaseAdminClient();
 
-  const { error: userError } = await client
-    .from("users")
-    .update({
-      full_name: input.full_name,
-      whatsapp: input.whatsapp,
-    })
-    .eq("id", userId);
-
-  if (userError) {
-    if (isDuplicateWhatsappError(userError)) {
-      await logAudit({
-        actorAuthId: actorAdminId,
-        actorAdminId,
-        entityType: "user",
-        entityId: userId,
-        action: "user.update",
-        detail: { reason: "duplicate_whatsapp" },
-        result: "error",
-      });
-      throw new AppError("WhatsApp duplicado", 409, "duplicate_whatsapp");
-    }
-
-    throw new AppError(userError.message, 500, "user_update_failed");
-  }
-
-  const { data: subscription, error: subscriptionReadError } = await client
-    .from("subscriptions")
-    .select("id")
-    .eq("user_id", userId)
-    .maybeSingle();
-
-  if (subscriptionReadError) {
-    throw new AppError(
-      subscriptionReadError.message,
-      500,
-      "subscription_read_failed",
-    );
-  }
-
-  if (!subscription) {
-    throw new AppError("Suscripción no encontrada", 404, "subscription_not_found");
-  }
-
-  const { error: subscriptionUpdateError } = await client
-    .from("subscriptions")
-    .update({
-      plan: input.plan,
-      amount_cents: input.amount_cents,
-      status: input.status,
-      start_date: input.start_date,
-      next_billing_date: input.next_billing_date,
-      source: input.source,
-    })
-    .eq("id", subscription.id);
-
-  if (subscriptionUpdateError) {
-    throw new AppError(
-      subscriptionUpdateError.message,
-      500,
-      "subscription_update_failed",
-    );
-  }
-
-  await logAudit({
-    actorAuthId: actorAdminId,
+  return updateUserAndSubscriptionUsingClient(
+    client,
+    userId,
+    input,
+    logAudit,
+    getUserById,
     actorAdminId,
-    entityType: "user",
-    entityId: userId,
-    action: "user.update",
-    detail: {
-      full_name: input.full_name,
-      whatsapp: input.whatsapp,
-      status: input.status,
-      plan: input.plan,
-      amount_cents: input.amount_cents,
-    },
-    result: "ok",
-  });
-
-  return getUserById(userId);
+  );
 }

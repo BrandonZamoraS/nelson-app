@@ -1,9 +1,11 @@
 import { PrivateShell } from "@/components/layout/private-shell";
 import { FlashMessage } from "@/components/ui/flash-message";
 import { Modal } from "@/components/ui/modal";
+import { PendingReviewSubscriptionsPanel } from "@/components/ui/pending-review-subscriptions-panel";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { SubscriptionStatusChanger } from "@/components/ui/subscription-status-changer";
 import { terminateSubscriptionAction } from "@/lib/actions/private-actions";
+import { listPendingReviewSubscriptionEvents } from "@/lib/data/subscription-events";
 import { listSubscriptions } from "@/lib/data/subscriptions";
 import { SUBSCRIPTION_STATUSES } from "@/lib/types/domain";
 import { formatCurrencyCents, formatDate } from "@/lib/utils/format";
@@ -30,7 +32,10 @@ export default async function SubscriptionsPage({
     limit: 100,
   });
   const filters = parsed.success ? parsed.data : {};
-  const rows = await listSubscriptions(filters);
+  const [rows, pendingReview] = await Promise.all([
+    listSubscriptions(filters),
+    listPendingReviewSubscriptionEvents(),
+  ]);
   const success = asString(params.success);
   const error = asString(params.error);
   const terminateId = asString(params.terminate);
@@ -46,6 +51,11 @@ export default async function SubscriptionsPage({
     >
       {success ? <FlashMessage kind="success" message={success} /> : null}
       {error ? <FlashMessage kind="error" message={error} /> : null}
+
+      <PendingReviewSubscriptionsPanel
+        items={pendingReview.items}
+        totalCount={pendingReview.totalCount}
+      />
 
       <section className="panel-block">
         <form className="toolbar" method="get">
