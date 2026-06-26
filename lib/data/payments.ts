@@ -61,8 +61,10 @@ export async function listPayments(
 
   if (input.search) {
     const escaped = input.search.replace(/[%_]/g, "");
-    query = query.or(
-      `users.full_name.ilike.%${escaped}%,users.whatsapp.ilike.%${escaped}%`,
+    query = query.filter(
+      "users",
+      "or",
+      `(full_name.ilike.%${escaped}%,whatsapp.ilike.%${escaped}%)`,
     );
   }
 
@@ -84,7 +86,6 @@ export async function listActiveSubscriptions(): Promise<
     .select(
       "id,plan,amount_cents,next_billing_date,status,users(id,full_name,whatsapp)",
     )
-    .neq("status", "terminada")
     .order("updated_at", { ascending: false });
 
   if (error) {
@@ -137,6 +138,24 @@ export async function createManualPayment(
   }
 
   const paidAt = input.paid_at;
+
+  const { data: existingPayment } = await client
+    .from("payments")
+    .select("id")
+    .eq("subscription_id", input.subscription_id)
+    .eq("source", "manual")
+    .gte("paid_at", paidAt + "T00:00:00Z")
+    .lt("paid_at", paidAt + "T23:59:59Z")
+    .maybeSingle();
+
+  if (existingPayment) {
+    throw new AppError(
+      "Already exists a manual payment for this subscription on this date",
+      409,
+      "payment_duplicate",
+    );
+  }
+
   let newNextBilling: string;
 
   if (
@@ -219,7 +238,7 @@ export async function updatePaymentStatus(
 
   const { data: existing, error: fetchError } = await client
     .from("payments")
-    .select("id,status")
+    .select("id,status,paid_at")
     .eq("id", input.payment_id)
     .single();
 
@@ -235,9 +254,15 @@ export async function updatePaymentStatus(
     return existing;
   }
 
+  const updatePayload: Record<string, unknown> = { status: input.status };
+
+  if (input.status === "paid" && !existing.paid_at) {
+    updatePayload.paid_at = new Date().toISOString();
+  }
+
   const { error: updateError } = await client
     .from("payments")
-    .update({ status: input.status })
+    .update(updatePayload)
     .eq("id", input.payment_id);
 
   if (updateError) {
