@@ -6,6 +6,10 @@ import { redirect, unstable_rethrow } from "next/navigation";
 import { requirePageSession } from "@/lib/auth/guard";
 import { patchSettings, updateAdminPassword } from "@/lib/data/settings";
 import {
+  createManualPayment,
+  updatePaymentStatus,
+} from "@/lib/data/payments";
+import {
   patchSubscriptionStatus,
   terminateSubscription,
 } from "@/lib/data/subscriptions";
@@ -24,6 +28,10 @@ import {
   updateUserFormInputSchema,
 } from "@/lib/validators/users";
 import { patchSubscriptionStatusInputSchema } from "@/lib/validators/subscriptions";
+import {
+  createManualPaymentInputSchema,
+  updatePaymentStatusInputSchema,
+} from "@/lib/validators/payments";
 import {
   updatePasswordInputSchema,
   updateSettingsInputSchema,
@@ -214,4 +222,53 @@ export async function updatePasswordAction(formData: FormData) {
   }
 
   redirect("/configuracion?success=Contraseña actualizada.");
+}
+
+export async function createManualPaymentAction(formData: FormData) {
+  const actor = await requirePageSession();
+  const parsed = createManualPaymentInputSchema.safeParse({
+    subscription_id: formData.get("subscription_id"),
+    amount_cents: formData.get("amount_cents"),
+    paid_at: formData.get("paid_at"),
+    external_ref: formData.get("external_ref"),
+  });
+
+  if (!parsed.success) {
+    redirect(`/pagos?error=${encodeURIComponent("Datos inválidos.")}`);
+  }
+
+  try {
+    await createManualPayment(parsed.data, actor.adminProfile.id);
+    revalidatePath("/pagos");
+    revalidatePath("/suscripciones");
+    revalidatePath("/usuarios");
+    revalidatePath("/");
+  } catch (error) {
+    const message = getActionErrorMessage(error);
+    redirect(`/pagos?error=${encodeURIComponent(message)}`);
+  }
+
+  redirect("/pagos?success=Pago registrado.");
+}
+
+export async function changePaymentStatusAction(formData: FormData) {
+  const actor = await requirePageSession();
+  const parsed = updatePaymentStatusInputSchema.safeParse({
+    payment_id: formData.get("payment_id"),
+    status: formData.get("status"),
+  });
+
+  if (!parsed.success) {
+    redirect(`/pagos?error=${encodeURIComponent("Datos inválidos.")}`);
+  }
+
+  try {
+    await updatePaymentStatus(parsed.data, actor.adminProfile.id);
+    revalidatePath("/pagos");
+  } catch (error) {
+    const message = getActionErrorMessage(error);
+    redirect(`/pagos?error=${encodeURIComponent(message)}`);
+  }
+
+  redirect("/pagos?success=Estado actualizado.");
 }
