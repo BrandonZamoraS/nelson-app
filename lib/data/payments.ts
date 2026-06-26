@@ -49,7 +49,7 @@ export async function listPayments(
   let query = client
     .from("payments")
     .select(
-      "id,subscription_id,user_id,event_id,amount_cents,currency,status,paid_at,due_at,source,external_ref,created_at,updated_at,users(id,full_name,whatsapp),subscriptions(id,plan,status,next_billing_date)",
+      "id,subscription_id,user_id,event_id,amount_cents,currency,status,paid_at,due_at,source,external_ref,created_at,updated_at,users!inner(id,full_name,whatsapp),subscriptions(id,plan,status,next_billing_date)",
     )
     .order("paid_at", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
@@ -99,9 +99,21 @@ export async function listActiveSubscriptions(): Promise<
 }
 
 function addMonths(dateStr: string, months: number): string {
-  const date = new Date(dateStr + "T00:00:00Z");
-  date.setUTCMonth(date.getUTCMonth() + months);
-  return date.toISOString().slice(0, 10);
+  const [yearStr, monthStr, dayStr] = dateStr.split("-");
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  const day = Number(dayStr);
+
+  const targetMonth = month + months - 1;
+  const targetYear = year + Math.floor(targetMonth / 12);
+  const normalizedMonth = ((targetMonth % 12) + 12) % 12;
+
+  const lastDay = new Date(Date.UTC(targetYear, normalizedMonth + 1, 0)).getUTCDate();
+  const clampedDay = Math.min(day, lastDay);
+
+  const mm = String(normalizedMonth + 1).padStart(2, "0");
+  const dd = String(clampedDay).padStart(2, "0");
+  return `${targetYear}-${mm}-${dd}`;
 }
 
 export async function createManualPayment(
@@ -139,7 +151,7 @@ export async function createManualPayment(
     newNextBilling = addMonths(paidAt, 1);
   }
 
-  const dueAt = subscription.next_billing_date ?? paidAt;
+  const dueAt = newNextBilling;
 
   const { data: payment, error: paymentError } = await client
     .from("payments")
@@ -174,6 +186,7 @@ export async function createManualPayment(
     .eq("id", input.subscription_id);
 
   if (updateError) {
+    await client.from("payments").delete().eq("id", payment.id);
     throw new AppError(
       updateError.message,
       500,

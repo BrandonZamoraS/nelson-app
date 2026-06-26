@@ -12,9 +12,22 @@ export function CreatePaymentForm({ subscriptions }: CreatePaymentFormProps) {
   const [selectedId, setSelectedId] = useState(
     subscriptions[0]?.id ?? "",
   );
+  const [amountCents, setAmountCents] = useState(
+    subscriptions[0]?.amount_cents ?? 0,
+  );
 
   const selected = subscriptions.find((s) => s.id === selectedId);
-  const today = new Date().toISOString().slice(0, 10);
+
+  const handleSubscriptionChange = (newId: string) => {
+    setSelectedId(newId);
+    const sub = subscriptions.find((s) => s.id === newId);
+    if (sub) {
+      setAmountCents(sub.amount_cents);
+    }
+  };
+
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 
   return (
     <form action={createManualPaymentAction} className="stack">
@@ -23,7 +36,7 @@ export function CreatePaymentForm({ subscriptions }: CreatePaymentFormProps) {
         <select
           name="subscription_id"
           value={selectedId}
-          onChange={(e) => setSelectedId(e.target.value)}
+          onChange={(e) => handleSubscriptionChange(e.target.value)}
           required
         >
           {subscriptions.map((sub) => {
@@ -42,7 +55,8 @@ export function CreatePaymentForm({ subscriptions }: CreatePaymentFormProps) {
         <input
           type="number"
           name="amount_cents"
-          defaultValue={selected?.amount_cents ?? ""}
+          value={amountCents}
+          onChange={(e) => setAmountCents(Number(e.target.value))}
           min={1}
           required
         />
