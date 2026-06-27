@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { createManualPaymentAction } from "@/lib/actions/private-actions";
 import type { ActiveSubscriptionOption } from "@/lib/data/payments";
 
@@ -12,22 +12,24 @@ export function CreatePaymentForm({ subscriptions }: CreatePaymentFormProps) {
   const [selectedId, setSelectedId] = useState(
     subscriptions[0]?.id ?? "",
   );
-  const [amountCents, setAmountCents] = useState(
-    subscriptions[0]?.amount_cents ?? 0,
+  const [amountUsd, setAmountUsd] = useState(
+    subscriptions[0] ? subscriptions[0].amount_cents / 100 : 0,
   );
+  const [paidAt, setPaidAt] = useState("");
 
-  const selected = subscriptions.find((s) => s.id === selectedId);
+  useEffect(() => {
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    setPaidAt(today);
+  }, []);
 
   const handleSubscriptionChange = (newId: string) => {
     setSelectedId(newId);
     const sub = subscriptions.find((s) => s.id === newId);
     if (sub) {
-      setAmountCents(sub.amount_cents);
+      setAmountUsd(sub.amount_cents / 100);
     }
   };
-
-  const now = new Date();
-  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
 
   return (
     <form action={createManualPaymentAction} className="stack">
@@ -51,13 +53,14 @@ export function CreatePaymentForm({ subscriptions }: CreatePaymentFormProps) {
       </label>
 
       <label className="field">
-        <span>Monto (centavos)</span>
+        <span>Monto (USD)</span>
         <input
           type="number"
-          name="amount_cents"
-          value={amountCents}
-          onChange={(e) => setAmountCents(Number(e.target.value))}
-          min={1}
+          name="amount_usd"
+          value={amountUsd}
+          onChange={(e) => setAmountUsd(Number(e.target.value))}
+          min={0.01}
+          step="0.01"
           required
         />
       </label>
@@ -67,7 +70,8 @@ export function CreatePaymentForm({ subscriptions }: CreatePaymentFormProps) {
         <input
           type="date"
           name="paid_at"
-          defaultValue={today}
+          value={paidAt}
+          onChange={(e) => setPaidAt(e.target.value)}
           required
         />
       </label>
