@@ -29,7 +29,7 @@ import {
 } from "@/lib/validators/users";
 import { patchSubscriptionStatusInputSchema } from "@/lib/validators/subscriptions";
 import {
-  createManualPaymentInputSchema,
+  createManualPaymentFormSchema,
   updatePaymentStatusInputSchema,
 } from "@/lib/validators/payments";
 import {
@@ -226,9 +226,9 @@ export async function updatePasswordAction(formData: FormData) {
 
 export async function createManualPaymentAction(formData: FormData) {
   const actor = await requirePageSession();
-  const parsed = createManualPaymentInputSchema.safeParse({
+  const parsed = createManualPaymentFormSchema.safeParse({
     subscription_id: formData.get("subscription_id"),
-    amount_cents: formData.get("amount_cents"),
+    amount_usd: formData.get("amount_usd"),
     paid_at: formData.get("paid_at"),
     external_ref: formData.get("external_ref"),
   });
@@ -238,7 +238,15 @@ export async function createManualPaymentAction(formData: FormData) {
   }
 
   try {
-    await createManualPayment(parsed.data, actor.adminProfile.id);
+    await createManualPayment(
+      {
+        subscription_id: parsed.data.subscription_id,
+        amount_cents: Math.round(parsed.data.amount_usd * 100),
+        paid_at: parsed.data.paid_at,
+        external_ref: parsed.data.external_ref,
+      },
+      actor.adminProfile.id,
+    );
     revalidatePath("/pagos");
     revalidatePath("/suscripciones");
     revalidatePath("/usuarios");

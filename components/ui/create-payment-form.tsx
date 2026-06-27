@@ -12,8 +12,8 @@ export function CreatePaymentForm({ subscriptions }: CreatePaymentFormProps) {
   const [selectedId, setSelectedId] = useState(
     subscriptions[0]?.id ?? "",
   );
-  const [amountCents, setAmountCents] = useState(
-    subscriptions[0]?.amount_cents ?? 0,
+  const [amountUsd, setAmountUsd] = useState(
+    subscriptions[0] ? subscriptions[0].amount_cents / 100 : 0,
   );
 
   const selected = subscriptions.find((s) => s.id === selectedId);
@@ -22,7 +22,7 @@ export function CreatePaymentForm({ subscriptions }: CreatePaymentFormProps) {
     setSelectedId(newId);
     const sub = subscriptions.find((s) => s.id === newId);
     if (sub) {
-      setAmountCents(sub.amount_cents);
+      setAmountUsd(sub.amount_cents / 100);
     }
   };
 
@@ -51,13 +51,14 @@ export function CreatePaymentForm({ subscriptions }: CreatePaymentFormProps) {
       </label>
 
       <label className="field">
-        <span>Monto (centavos)</span>
+        <span>Monto (USD)</span>
         <input
           type="number"
-          name="amount_cents"
-          value={amountCents}
-          onChange={(e) => setAmountCents(Number(e.target.value))}
-          min={1}
+          name="amount_usd"
+          value={amountUsd}
+          onChange={(e) => setAmountUsd(Number(e.target.value))}
+          min={0.01}
+          step="0.01"
           required
         />
       </label>
