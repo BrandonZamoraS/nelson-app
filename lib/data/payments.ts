@@ -61,10 +61,9 @@ export async function listPayments(
 
   if (input.search) {
     const escaped = input.search.replace(/[%_]/g, "");
-    query = query.filter(
-      "users",
-      "or",
-      `(full_name.ilike.%${escaped}%,whatsapp.ilike.%${escaped}%)`,
+    query = query.or(
+      `full_name.ilike.%${escaped}%,whatsapp.ilike.%${escaped}%`,
+      { referencedTable: "users" },
     );
   }
 
@@ -139,23 +138,6 @@ export async function createManualPayment(
 
   const paidAt = input.paid_at;
 
-  const { data: existingPayment } = await client
-    .from("payments")
-    .select("id")
-    .eq("subscription_id", input.subscription_id)
-    .eq("source", "manual")
-    .gte("paid_at", paidAt + "T00:00:00Z")
-    .lt("paid_at", paidAt + "T23:59:59Z")
-    .maybeSingle();
-
-  if (existingPayment) {
-    throw new AppError(
-      "Already exists a manual payment for this subscription on this date",
-      409,
-      "payment_duplicate",
-    );
-  }
-
   let newNextBilling: string;
 
   if (
@@ -172,6 +154,9 @@ export async function createManualPayment(
 
   const dueAt = newNextBilling;
 
+  // Insert first, then verify uniqueness to narrow the race-condition window.
+  // TODO: add a unique partial index on (subscription_id, paid_at::date)
+  // WHERE source = 'manual' to enforce this at the database level.
   const { data: payment, error: paymentError } = await client
     .from("payments")
     .insert({
@@ -196,6 +181,25 @@ export async function createManualPayment(
     );
   }
 
+  // Post-insert duplicate verification: if another manual payment for the
+  // same subscription/date was committed, roll back this one.
+  const { data: sameDayPayments } = await client
+    .from("payments")
+    .select("id")
+    .eq("subscription_id", input.subscription_id)
+    .eq("source", "manual")
+    .gte("paid_at", paidAt + "T00:00:00Z")
+    .lt("paid_at", paidAt + "T23:59:59Z");
+
+  if (sameDayPayments && sameDayPayments.length > 1) {
+    await client.from("payments").delete().eq("id", payment.id);
+    throw new AppError(
+      "Already exists a manual payment for this subscription on this date",
+      409,
+      "payment_duplicate",
+    );
+  }
+
   const { error: updateError } = await client
     .from("subscriptions")
     .update({
@@ -211,6 +215,25 @@ export async function createManualPayment(
       500,
       "payment_subscription_update_failed",
     );
+  }
+
+  // Fix #3: Reactivate user when reviving a suspended/terminated subscription
+  if (
+    subscription.status === "suspendida" ||
+    subscription.status === "terminada"
+  ) {
+    const { data: user } = await client
+      .from("users")
+      .select("id,is_active")
+      .eq("id", subscription.user_id)
+      .maybeSingle();
+
+    if (user && user.is_active === false) {
+      await client
+        .from("users")
+        .update({ is_active: true, deactivated_at: null })
+        .eq("id", subscription.user_id);
+    }
   }
 
   await logAudit({
@@ -238,7 +261,7 @@ export async function updatePaymentStatus(
 
   const { data: existing, error: fetchError } = await client
     .from("payments")
-    .select("id,status,paid_at")
+    .select("id,status,paid_at,subscription_id,user_id")
     .eq("id", input.payment_id)
     .single();
 
@@ -255,9 +278,13 @@ export async function updatePaymentStatus(
   }
 
   const updatePayload: Record<string, unknown> = { status: input.status };
+  const paidAtTimestamp =
+    input.status === "paid" && !existing.paid_at
+      ? new Date().toISOString()
+      : null;
 
-  if (input.status === "paid" && !existing.paid_at) {
-    updatePayload.paid_at = new Date().toISOString();
+  if (paidAtTimestamp) {
+    updatePayload.paid_at = paidAtTimestamp;
   }
 
   const { error: updateError } = await client
@@ -271,6 +298,54 @@ export async function updatePaymentStatus(
       500,
       "payment_status_update_failed",
     );
+  }
+
+  // When transitioning to "paid", propagate subscription and user effects
+  // so the customer's access stays consistent with the payment state.
+  if (input.status === "paid" && existing.subscription_id) {
+    const { data: subscription } = await client
+      .from("subscriptions")
+      .select("id,status,next_billing_date")
+      .eq("id", existing.subscription_id)
+      .maybeSingle();
+
+    if (subscription) {
+      const paidAtDate = paidAtTimestamp
+        ? paidAtTimestamp.slice(0, 10)
+        : (existing.paid_at ?? "").slice(0, 10);
+
+      let newNextBilling: string;
+      if (
+        subscription.status === "gracia" ||
+        subscription.status === "suspendida" ||
+        subscription.status === "terminada" ||
+        !subscription.next_billing_date
+      ) {
+        newNextBilling = addMonths(paidAtDate, 1);
+      } else {
+        newNextBilling = addMonths(subscription.next_billing_date, 1);
+      }
+
+      await client
+        .from("subscriptions")
+        .update({ status: "activa", next_billing_date: newNextBilling })
+        .eq("id", existing.subscription_id);
+
+      if (existing.user_id) {
+        const { data: user } = await client
+          .from("users")
+          .select("id,is_active")
+          .eq("id", existing.user_id)
+          .maybeSingle();
+
+        if (user && user.is_active === false) {
+          await client
+            .from("users")
+            .update({ is_active: true, deactivated_at: null })
+            .eq("id", existing.user_id);
+        }
+      }
+    }
   }
 
   await logAudit({
