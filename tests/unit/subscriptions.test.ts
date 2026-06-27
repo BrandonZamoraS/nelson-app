@@ -8,6 +8,7 @@ import {
   ensureManualSubscriptionEventProcessed,
   toManualSubscriptionAuditEntry,
 } from "@/lib/domain/manual-subscription-events";
+import { listSubscriptionsInputSchema } from "@/lib/validators/subscriptions";
 
 const subscription = {
   id: "sub-1",
@@ -135,4 +136,19 @@ test("terminateSubscription allows ignored terminal cancels as an idempotent suc
     source,
     /ensureManualSubscriptionEventProcessed\(result,\s*\{\s*allowIgnoredTerminalCancel:\s*true,?\s*\}\)/,
   );
+});
+
+test("listSubscriptionsInputSchema accepts the includeEnded checkbox flag", () => {
+  const parsed = listSubscriptionsInputSchema.parse({ includeEnded: "on" });
+
+  assert.equal(parsed.includeEnded, true);
+});
+
+test("listSubscriptions hides terminated subscriptions unless includeEnded is enabled", () => {
+  const source = fs.readFileSync(
+    path.join(process.cwd(), "lib", "data", "subscriptions.ts"),
+    "utf8",
+  );
+
+  assert.match(source, /if \(!input\.includeEnded && !input\.status\) \{\s*query = query\.neq\("status", "terminada"\);\s*\}/);
 });

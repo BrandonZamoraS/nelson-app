@@ -10,6 +10,7 @@ import { listSubscriptions } from "@/lib/data/subscriptions";
 import { SUBSCRIPTION_STATUSES } from "@/lib/types/domain";
 import { formatCurrencyCents, formatDate } from "@/lib/utils/format";
 import { listSubscriptionsInputSchema } from "@/lib/validators/subscriptions";
+import type { ListSubscriptionsInput } from "@/lib/validators/subscriptions";
 
 type SubscriptionsPageProps = {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -29,9 +30,12 @@ export default async function SubscriptionsPage({
   const parsed = listSubscriptionsInputSchema.safeParse({
     search: asString(params.search) || undefined,
     status: asString(params.status) || undefined,
+    includeEnded: asString(params.includeEnded) || undefined,
     limit: 100,
   });
-  const filters = parsed.success ? parsed.data : {};
+  const filters: ListSubscriptionsInput = parsed.success
+    ? parsed.data
+    : { includeEnded: false };
   const [rows, pendingReview] = await Promise.all([
     listSubscriptions(filters),
     listPendingReviewSubscriptionEvents(),
@@ -73,6 +77,15 @@ export default async function SubscriptionsPage({
               </option>
             ))}
           </select>
+          <label className="checkbox-field">
+            <input
+              type="checkbox"
+              name="includeEnded"
+              value="on"
+              defaultChecked={filters.includeEnded}
+            />
+            Mostrar terminadas
+          </label>
           <button className="button button-ghost" type="submit">
             Filtrar
           </button>
