@@ -6,14 +6,11 @@ import {
 } from "@/lib/domain/manual-subscription-events";
 import { AppError } from "@/lib/errors/app-error";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
-import type { SubscriptionRecord, SubscriptionStatus } from "@/lib/types/domain";
-import type { PatchSubscriptionStatusInput } from "@/lib/validators/subscriptions";
-
-type ListSubscriptionsInput = {
-  search?: string;
-  status?: SubscriptionStatus;
-  limit?: number;
-};
+import type { SubscriptionRecord } from "@/lib/types/domain";
+import type {
+  ListSubscriptionsInput,
+  PatchSubscriptionStatusInput,
+} from "@/lib/validators/subscriptions";
 
 export type SubscriptionWithUser = SubscriptionRecord & {
   users:
@@ -31,7 +28,7 @@ export type SubscriptionWithUser = SubscriptionRecord & {
 };
 
 export async function listSubscriptions(
-  input: ListSubscriptionsInput = {},
+  input: ListSubscriptionsInput = { includeEnded: false },
 ): Promise<SubscriptionWithUser[]> {
   const client = createSupabaseAdminClient();
   const limit = input.limit ?? 100;
@@ -46,6 +43,10 @@ export async function listSubscriptions(
 
   if (input.status) {
     query = query.eq("status", input.status);
+  }
+
+  if (!input.includeEnded && !input.status) {
+    query = query.neq("status", "terminada");
   }
 
   if (input.search) {

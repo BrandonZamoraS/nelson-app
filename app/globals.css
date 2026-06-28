@@ -382,6 +382,20 @@ button {
   min-width: 170px;
 }
 
+.toolbar .checkbox-field {
+  align-items: center;
+  color: var(--text-primary);
+  display: inline-flex;
+  font-size: 0.9rem;
+  font-weight: 600;
+  gap: 8px;
+}
+
+.toolbar .checkbox-field input {
+  min-width: 0;
+  width: auto;
+}
+
 .form-field {
   display: grid;
   gap: 6px;

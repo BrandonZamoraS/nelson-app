@@ -8,6 +8,7 @@ import {
   ensureManualSubscriptionEventProcessed,
   toManualSubscriptionAuditEntry,
 } from "@/lib/domain/manual-subscription-events";
+import { listSubscriptionsInputSchema } from "@/lib/validators/subscriptions";
 
 const subscription = {
   id: "sub-1",
@@ -135,4 +136,45 @@ test("terminateSubscription allows ignored terminal cancels as an idempotent suc
     source,
     /ensureManualSubscriptionEventProcessed\(result,\s*\{\s*allowIgnoredTerminalCancel:\s*true,?\s*\}\)/,
   );
+});
+
+test("listSubscriptionsInputSchema accepts the includeEnded checkbox flag", () => {
+  const parsed = listSubscriptionsInputSchema.parse({ includeEnded: "on" });
+
+  assert.equal(parsed.includeEnded, true);
+});
+
+test("listSubscriptions hides terminated subscriptions unless includeEnded is enabled", () => {
+  const source = fs.readFileSync(
+    path.join(process.cwd(), "lib", "data", "subscriptions.ts"),
+    "utf8",
+  );
+
+  assert.match(source, /if \(!input\.includeEnded && !input\.status\) \{\s*query = query\.neq\("status", "terminada"\);\s*\}/);
+});
+
+test("subscriptions API forwards the includeEnded query flag", () => {
+  const source = fs.readFileSync(
+    path.join(process.cwd(), "app", "api", "subscriptions", "route.ts"),
+    "utf8",
+  );
+
+  assert.match(source, /includeEnded:\s*params\.get\("includeEnded"\) \?\? undefined/);
+});
+
+test("subscriptions toolbar checkbox keeps its intrinsic width", () => {
+  const source = fs.readFileSync(path.join(process.cwd(), "app", "globals.css"), "utf8");
+
+  assert.match(source, /\.toolbar \.checkbox-field input \{\s*min-width: 0;\s*width: auto;\s*\}/);
+});
+
+test("terminate subscription links preserve active filters", () => {
+  const source = fs.readFileSync(
+    path.join(process.cwd(), "app", "(private)", "suscripciones", "page.tsx"),
+    "utf8",
+  );
+
+  assert.match(source, /const terminateHref = new URLSearchParams\(currentQuery\);/);
+  assert.match(source, /terminateHref\.set\("terminate", row\.id\);/);
+  assert.match(source, /href=\{`\/suscripciones\?\$\{terminateHref\.toString\(\)\}`\}/);
 });
