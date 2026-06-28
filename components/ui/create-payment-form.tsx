@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { createManualPaymentAction } from "@/lib/actions/private-actions";
 import type { ActiveSubscriptionOption } from "@/lib/data/payments";
 
@@ -15,13 +15,10 @@ export function CreatePaymentForm({ subscriptions }: CreatePaymentFormProps) {
   const [amountUsd, setAmountUsd] = useState(
     subscriptions[0] ? subscriptions[0].amount_cents / 100 : 0,
   );
-  const [paidAt, setPaidAt] = useState("");
-
-  useEffect(() => {
+  const [paidAt, setPaidAt] = useState(() => {
     const now = new Date();
-    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-    setPaidAt(today);
-  }, []);
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  });
 
   const handleSubscriptionChange = (newId: string) => {
     setSelectedId(newId);
