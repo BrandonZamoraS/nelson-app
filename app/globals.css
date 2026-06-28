@@ -393,6 +393,7 @@ button {
 
 .toolbar .checkbox-field input {
   min-width: 0;
+  width: auto;
 }
 
 .form-field {

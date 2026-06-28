@@ -16,6 +16,7 @@ export async function GET(request: NextRequest) {
   const parsed = listSubscriptionsInputSchema.safeParse({
     search: params.get("search") ?? undefined,
     status: params.get("status") ?? undefined,
+    includeEnded: params.get("includeEnded") ?? undefined,
     limit: params.get("limit") ?? undefined,
   });
 

@@ -31,7 +31,7 @@ export default async function SubscriptionsPage({
     search: asString(params.search) || undefined,
     status: asString(params.status) || undefined,
     includeEnded: asString(params.includeEnded) || undefined,
-    limit: 100,
+    limit: asString(params.limit) || 100,
   });
   const filters: ListSubscriptionsInput = parsed.success
     ? parsed.data
@@ -47,6 +47,25 @@ export default async function SubscriptionsPage({
     terminateId && rows.find((row) => row.id === terminateId)
       ? rows.find((row) => row.id === terminateId)
       : null;
+  const currentQuery = new URLSearchParams();
+
+  if (asString(params.search)) {
+    currentQuery.set("search", asString(params.search));
+  }
+  if (asString(params.status)) {
+    currentQuery.set("status", asString(params.status));
+  }
+  if (asString(params.includeEnded)) {
+    currentQuery.set("includeEnded", asString(params.includeEnded));
+  }
+  if (asString(params.limit)) {
+    currentQuery.set("limit", asString(params.limit));
+  }
+
+  const currentQueryString = currentQuery.toString();
+  const subscriptionsHref = currentQueryString
+    ? `/suscripciones?${currentQueryString}`
+    : "/suscripciones";
 
   return (
     <PrivateShell
@@ -107,6 +126,9 @@ export default async function SubscriptionsPage({
             <tbody>
               {rows.map((row) => {
                 const user = Array.isArray(row.users) ? row.users[0] : row.users;
+                const terminateHref = new URLSearchParams(currentQuery);
+
+                terminateHref.set("terminate", row.id);
 
                 return (
                   <tr key={row.id}>
@@ -131,7 +153,7 @@ export default async function SubscriptionsPage({
                     <td>
                       <a
                         className="button button-danger"
-                        href={`/suscripciones?terminate=${row.id}`}
+                        href={`/suscripciones?${terminateHref.toString()}`}
                       >
                         Terminar
                       </a>
@@ -145,7 +167,7 @@ export default async function SubscriptionsPage({
       </section>
 
       {terminateTarget ? (
-        <Modal title="Confirmar terminación" closeHref="/suscripciones">
+        <Modal title="Confirmar terminación" closeHref={subscriptionsHref}>
           <p>
             Vas a terminar la suscripción de{" "}
             <strong>
@@ -164,7 +186,7 @@ export default async function SubscriptionsPage({
             <button type="submit" className="button button-danger">
               Confirmar
             </button>
-            <a href="/suscripciones" className="button button-ghost">
+            <a href={subscriptionsHref} className="button button-ghost">
               Cancelar
             </a>
           </form>
