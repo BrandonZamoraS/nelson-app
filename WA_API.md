@@ -43,8 +43,10 @@ Base URL:
 - `missing_budget`
 - `crop_budget_missing`
 - `invalid_budget`
+- `invalid_measurement_unit`
 - `invalid_crop_ids`
 - `invalid_finished_crops`
+- `measurement_unit_immutable`
 - `missing_gross_profit`
 - `invalid_gross_profit`
 - `period_out_of_range`
@@ -68,6 +70,7 @@ Body (campos):
 Response (campos):
 
 - `crop`: `id`, `description`, `start_date`, `end_date`, `budget`.
+- `crop.measurement_unit`: unidad inmutable del cultivo (`kg` por defecto).
 - `spent_amount`: suma de `expenses.amount` del cultivo.
 - `remaining_amount`: `budget - spent_amount`.
 - `expense_summary`: lista por categoria con `expense_type.id`, `expense_type.description`, `total_amount`.
@@ -113,6 +116,7 @@ Body (campos):
 Response (campos):
 
 - `items`: por cultivo `crop_id`, `description`, `end_date`, `total_spent`.
+- `items.measurement_unit`: unidad propia de cada cultivo comparado.
 - `grand_total_spent`: suma global.
 
 Reglas:
@@ -158,6 +162,8 @@ Response (campos):
 - `report_type`: `partial` o `total`.
 - `period`: `from`, `to` finales usados.
 - `crop`: `id`, `description`, `size`, `start_date`, `end_date`, `budget`.
+- `crop.measurement_unit`: unidad del cultivo.
+- `measurement_unit`: atajo top-level para renderizadores/n8n.
 - `spent_amount`.
 - `gross_profit`: valor bruto registrado al finalizar (o `null` si no existe).
 - `net_profit`: `gross_profit - spent_amount` (o `null` si `gross_profit` no existe).
@@ -234,6 +240,14 @@ curl -sS -X POST "https://izhazpjzapckskkgayog.functions.supabase.co/wa_finalize
 ```
 
 Tambien puedes usar el alias `ganancia_bruta`.
+
+Notas para cultivos (`wa_create_crop`, `wa_update_crop`, `wa_list_crops`, `wa_finalize_crop`):
+
+- `measurement_unit` se puede enviar solo al crear.
+- Valores soportados por la API actual: `kg`, `lb`, `quintal`, `cajuela`.
+- Si se omite al crear, la base guarda `kg`.
+- Si se intenta cambiar luego, retorna `400 measurement_unit_immutable`.
+- Las respuestas de cultivo ahora incluyen `measurement_unit`.
 
 Notas para gastos (`wa_create_expense` y `wa_update_expense`):
 

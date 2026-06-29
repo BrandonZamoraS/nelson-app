@@ -6,6 +6,7 @@ import test from "node:test";
 const rootDir = process.cwd();
 const functionsDir = path.join(rootDir, "supabase", "functions");
 const migrationsDir = path.join(rootDir, "supabase", "migrations");
+const n8nScriptPath = path.join(rootDir, "docs", "n8n", "crop-html-report-code-node.js");
 
 const requiredFunctions = [
   "wa_crop_budget_status",
@@ -79,31 +80,51 @@ test("function contracts include required fields and action names", () => {
   const reportData = readFileOrEmpty(
     path.join(functionsDir, "wa_crop_report_data", "index.ts"),
   );
+  const cropMeasurementRuntime = readFileOrEmpty(
+    path.join(rootDir, "lib", "wa", "crop-measurement-runtime.ts"),
+  );
 
-  assert.match(budgetStatus, /missing_budget/i);
-  assert.match(budgetStatus, /spent_amount/i);
-  assert.match(budgetStatus, /remaining_amount/i);
-  assert.match(budgetStatus, /budget_status/i);
-  assert.match(budgetStatus, /expense_summary/i);
-  assert.match(budgetStatus, /application\/x-www-form-urlencoded/i);
+  assert.match(budgetStatus, /buildCropBudgetStatusRuntime/i);
+  assert.match(cropMeasurementRuntime, /missing_budget/i);
+  assert.match(cropMeasurementRuntime, /spent_amount/i);
+  assert.match(cropMeasurementRuntime, /remaining_amount/i);
+  assert.match(cropMeasurementRuntime, /budget_status/i);
+  assert.match(cropMeasurementRuntime, /expense_summary/i);
+  assert.match(cropMeasurementRuntime, /measurement_unit/i);
+  assert.match(cropMeasurementRuntime, /application\/x-www-form-urlencoded/i);
   assert.doesNotMatch(budgetStatus, /\bbudget_amount\b/i);
-  assert.match(budgetStatus, /\bbudget\b/i);
+  assert.match(cropMeasurementRuntime, /\bbudget\b/i);
 
-  assert.match(compareCosts, /compare_finished_crops_costs/i);
-  assert.match(compareCosts, /grand_total_spent/i);
-  assert.match(compareCosts, /crop_id_1/i);
-  assert.match(compareCosts, /crop_id_2/i);
-  assert.match(compareCosts, /application\/x-www-form-urlencoded/i);
+  assert.match(compareCosts, /buildCompareFinishedCropsCostsRuntime/i);
+  assert.match(cropMeasurementRuntime, /compare_finished_crops_costs/i);
+  assert.match(cropMeasurementRuntime, /grand_total_spent/i);
+  assert.match(cropMeasurementRuntime, /crop_id_1/i);
+  assert.match(cropMeasurementRuntime, /crop_id_2/i);
+  assert.match(cropMeasurementRuntime, /measurement_unit/i);
+  assert.match(cropMeasurementRuntime, /items:/i);
+  assert.match(cropMeasurementRuntime, /application\/x-www-form-urlencoded/i);
 
-  assert.match(reportData, /crop_report_data/i);
-  assert.match(reportData, /report_type/i);
-  assert.match(reportData, /partial|total/i);
-  assert.match(reportData, /expense_type/i);
-  assert.match(reportData, /gross_profit/i);
-  assert.match(reportData, /net_profit/i);
+  assert.match(reportData, /buildCropReportDataRuntime/i);
+  assert.match(cropMeasurementRuntime, /crop_report_data/i);
+  assert.match(cropMeasurementRuntime, /report_type/i);
+  assert.match(cropMeasurementRuntime, /partial|total/i);
+  assert.match(cropMeasurementRuntime, /expense_type/i);
+  assert.match(cropMeasurementRuntime, /gross_profit/i);
+  assert.match(cropMeasurementRuntime, /net_profit/i);
+  assert.match(cropMeasurementRuntime, /measurement_unit/i);
   assert.doesNotMatch(reportData, /\bbudget_amount\b/i);
-  assert.match(reportData, /\bbudget\b/i);
+  assert.match(cropMeasurementRuntime, /\bbudget\b/i);
   assert.doesNotMatch(reportData, /\bdate_from\b/i);
   assert.doesNotMatch(reportData, /\bdate_to\b/i);
-  assert.match(reportData, /application\/x-www-form-urlencoded/i);
+  assert.match(cropMeasurementRuntime, /application\/x-www-form-urlencoded/i);
+});
+
+test("n8n crop html report script is saved with measurement unit fallback labels", () => {
+  assert.equal(fs.existsSync(n8nScriptPath), true, `Missing ${n8nScriptPath}`);
+
+  const script = readFileOrEmpty(n8nScriptPath);
+  assert.match(script, /measurementUnit/i);
+  assert.match(script, /measurement_unit \?\? ['"]kg['"]/i);
+  assert.match(script, /per \$\{measurementUnit\}/i);
+  assert.match(script, /kilos\b/i);
 });
