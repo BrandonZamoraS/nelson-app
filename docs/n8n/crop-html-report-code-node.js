@@ -7,6 +7,13 @@ const report = payload.ok === true ? payload : payload;
 const measurementUnit = String(report.measurement_unit ?? report.crop?.measurement_unit ?? 'kg').trim() || 'kg';
 const legacyUnitLabel = measurementUnit === 'kg' ? 'kilos' : measurementUnit;
 
+const esc = (value = '') => String(value)
+  .replaceAll('&', '&amp;')
+  .replaceAll('<', '&lt;')
+  .replaceAll('>', '&gt;')
+  .replaceAll('"', '&quot;')
+  .replaceAll("'", '&#39;');
+
 const formatMoney = (value) => {
   const amount = typeof value === 'number' ? value : Number(value ?? 0);
   return new Intl.NumberFormat('es-HN', {
@@ -41,15 +48,15 @@ const html = `
   </head>
   <body>
     <h1>Reporte de cultivo</h1>
-    <p><strong>Cultivo:</strong> ${report.crop?.description ?? 'Sin descripción'}</p>
-    <p><strong>Unidad de medida:</strong> ${measurementUnit}</p>
+    <p><strong>Cultivo:</strong> ${esc(report.crop?.description ?? 'Sin descripción')}</p>
+    <p><strong>Unidad de medida:</strong> ${esc(measurementUnit)}</p>
     <div class="metric"><strong>Presupuesto:</strong> ${formatMoney(report.crop?.budget)}</div>
     <div class="metric"><strong>Gasto total:</strong> ${formatMoney(totalExpenses)}</div>
     <div class="metric"><strong>Ganancia bruta:</strong> ${formatMoney(grossProfit)}</div>
     <div class="metric"><strong>Ganancia neta:</strong> ${formatMoney(netProfit)}</div>
-    <div class="metric"><strong>Rendimiento (${legacyUnitLabel}):</strong> ${report.yield_amount ?? 'N/D'}</div>
-    <div class="metric"><strong>${pricePerUnitLabel}:</strong> ${report.price_per_unit ?? 'N/D'}</div>
-    <div class="metric"><strong>${costPerUnitLabel}:</strong> ${report.cost_per_unit ?? 'N/D'}</div>
+    <div class="metric"><strong>Rendimiento (${esc(legacyUnitLabel)}):</strong> ${esc(report.yield_amount ?? 'N/D')}</div>
+    <div class="metric"><strong>${esc(pricePerUnitLabel)}:</strong> ${esc(report.price_per_unit ?? 'N/D')}</div>
+    <div class="metric"><strong>${esc(costPerUnitLabel)}:</strong> ${esc(report.cost_per_unit ?? 'N/D')}</div>
     <div class="metric"><strong>Compatibilidad:</strong> si el flujo anterior esperaba kilos, cuando la unidad siga siendo kg se mantiene la etiqueta kilos.</div>
   </body>
 </html>`;

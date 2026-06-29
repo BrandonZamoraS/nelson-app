@@ -285,3 +285,22 @@ test("n8n crop report script renders dynamic measurement-unit labels and kg fall
   assert.match(dynamicHtml, /Cost per lb/i);
   assert.match(fallbackHtml, /Rendimiento \(kilos\):/i);
 });
+
+test("n8n crop report script escapes user-controlled report values", () => {
+  const result = executeN8nScript({
+    measurement_unit: "<img onerror=alert(1)>",
+    crop: { description: "<script>alert('x')</script>", budget: 1000 },
+    yield_amount: "<b>42</b>",
+    price_per_unit: "<img src=x onerror=alert(2)>",
+    cost_per_unit: "<svg onload=alert(3)>",
+  });
+
+  const html = String(result[0]?.json.html ?? "");
+
+  assert.doesNotMatch(html, /<script>alert\('x'\)<\/script>/i);
+  assert.doesNotMatch(html, /<img[^>]+onerror/i);
+  assert.doesNotMatch(html, /<svg[^>]+onload/i);
+  assert.match(html, /&lt;script&gt;alert\(&#39;x&#39;\)&lt;\/script&gt;/i);
+  assert.match(html, /&lt;img onerror=alert\(1\)&gt;/i);
+  assert.match(html, /&lt;b&gt;42&lt;\/b&gt;/i);
+});

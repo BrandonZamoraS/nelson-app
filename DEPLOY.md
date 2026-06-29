@@ -2,6 +2,10 @@
 
 Este documento deja listo el deploy de:
 
+- `wa_create_crop`
+- `wa_update_crop`
+- `wa_list_crops`
+- `wa_finalize_crop`
 - `wa_crop_budget_status`
 - `wa_compare_finished_crops_costs`
 - `wa_crop_report_data`
@@ -49,6 +53,10 @@ supabase db push
 ## 4) Deploy de funciones
 
 ```bash
+supabase functions deploy wa_create_crop --no-verify-jwt
+supabase functions deploy wa_update_crop --no-verify-jwt
+supabase functions deploy wa_list_crops --no-verify-jwt
+supabase functions deploy wa_finalize_crop --no-verify-jwt
 supabase functions deploy wa_crop_budget_status --no-verify-jwt
 supabase functions deploy wa_compare_finished_crops_costs --no-verify-jwt
 supabase functions deploy wa_crop_report_data --no-verify-jwt
