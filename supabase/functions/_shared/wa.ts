@@ -74,6 +74,7 @@ export type CropRow = {
   size: number | null;
   budget: number | null;
   gross_profit: number | null;
+  measurement_unit: string;
   start_date: string | null;
   end_date: string | null;
   user: string | null;
@@ -442,7 +443,7 @@ export async function getCropOwnedByUser(
 
   const { data, error } = await supabase
     .from("crops")
-    .select("id, created_at, description, size, budget, gross_profit, start_date, end_date, user")
+    .select("id, created_at, description, size, budget, gross_profit, measurement_unit, start_date, end_date, user")
     .eq("id", parsedCropId.value)
     .eq("user", userId)
     .maybeSingle();

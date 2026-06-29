@@ -2,6 +2,10 @@
 
 Este documento deja listo el deploy de:
 
+- `wa_create_crop`
+- `wa_update_crop`
+- `wa_list_crops`
+- `wa_finalize_crop`
 - `wa_crop_budget_status`
 - `wa_compare_finished_crops_costs`
 - `wa_crop_report_data`
@@ -38,6 +42,7 @@ Incluye:
 
 - `supabase/migrations/20260215093000_fix_expenses_crop_id_bigint.sql`
 - `supabase/migrations/20260216083000_drop_crops_budget_amount_use_budget.sql`
+- `supabase/migrations/20260627193000_add_crop_measurement_unit.sql`
 
 Comando:
 
@@ -48,10 +53,19 @@ supabase db push
 ## 4) Deploy de funciones
 
 ```bash
+supabase functions deploy wa_create_crop --no-verify-jwt
+supabase functions deploy wa_update_crop --no-verify-jwt
+supabase functions deploy wa_list_crops --no-verify-jwt
+supabase functions deploy wa_finalize_crop --no-verify-jwt
 supabase functions deploy wa_crop_budget_status --no-verify-jwt
 supabase functions deploy wa_compare_finished_crops_costs --no-verify-jwt
 supabase functions deploy wa_crop_report_data --no-verify-jwt
 ```
+
+## 4.1) Actualizar workflow n8n
+
+- Guardar en el workflow el script versionado en `docs/n8n/crop-html-report-code-node.js`.
+- El script espera `measurement_unit` o `crop.measurement_unit` y cae a `kg` para compatibilidad.
 
 ## 5) Smoke tests (curl)
 

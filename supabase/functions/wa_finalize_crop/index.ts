@@ -86,7 +86,7 @@ serve((req) =>
       .update(patch)
       .eq("id", cropId)
       .eq("user", user.id)
-      .select("id, created_at, description, size, budget, gross_profit, start_date, end_date")
+      .select("id, created_at, description, size, budget, gross_profit, measurement_unit, start_date, end_date")
       .single();
     if (error) {
       await insertAuditLog(supabase, {
